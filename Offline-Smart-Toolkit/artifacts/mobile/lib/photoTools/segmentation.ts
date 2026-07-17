@@ -22,6 +22,7 @@ import { decodeJpeg } from '@tensorflow/tfjs-react-native/dist/decode_image';
 import * as bodyPix from '@tensorflow-models/body-pix';
 import { convertFormat, SaveFormat } from './imageOps';
 import { writePngFromRGBA } from './exportUtils';
+import { blurImage } from './pixelOps';
 import type { BackgroundPreset } from './types';
 
 let modelPromise: Promise<bodyPix.BodyPix> | null = null;
@@ -168,6 +169,55 @@ export async function removeBackground(
     }
 
     const outUri = await writePngFromRGBA(rgba, width, height);
+    return { uri: outUri, width, height };
+  } finally {
+    tensor.dispose();
+  }
+}
+
+/**
+ * Blurs the background of an image while keeping the person sharp.
+ * `blurRadius` 1–15; typical: light=3, medium=6, heavy=10.
+ */
+export async function blurBackground(
+  uri: string,
+  blurRadius: number
+): Promise<{ uri: string; width: number; height: number }> {
+  const model = await getModel();
+  const { tensor, width, height } = await decodeToTensor(uri);
+  try {
+    const segmentation = await model.segmentPerson(tensor, {
+      internalResolution: 'medium',
+      segmentationThreshold: 0.6,
+    });
+    const pixels = await tf.browser.toPixels(tensor.div(255) as tf.Tensor3D);
+    const mask = segmentation.data as unknown as Uint8Array;
+
+    // Build RGBA source
+    const rgba = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      rgba[i * 4] = pixels[i * 4];
+      rgba[i * 4 + 1] = pixels[i * 4 + 1];
+      rgba[i * 4 + 2] = pixels[i * 4 + 2];
+      rgba[i * 4 + 3] = 255;
+    }
+
+    // Blur a copy of the whole image
+    const blurred = blurImage({ width, height, pixels: rgba }, blurRadius);
+
+    // Composite: person stays sharp, background uses blurred version
+    const composite = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i++) {
+      const o = i * 4;
+      const isPerson = mask[i] === 1;
+      const src = isPerson ? rgba : blurred.pixels;
+      composite[o] = src[o];
+      composite[o + 1] = src[o + 1];
+      composite[o + 2] = src[o + 2];
+      composite[o + 3] = 255;
+    }
+
+    const outUri = await writePngFromRGBA(composite, width, height);
     return { uri: outUri, width, height };
   } finally {
     tensor.dispose();

@@ -43,6 +43,40 @@ pnpm run dev
 cd Offline-Smart-Toolkit && pnpm install
 ```
 
+## Photo Tools Module (24 tools total)
+
+All tools are 100% offline — no API, no internet, no Firebase.
+
+| # | Tool | Route | Status |
+|---|------|-------|--------|
+| 1 | Background Remove | `/photo-tools/background-remove` | ✅ Full (BodyPix segmentation) |
+| 2 | Passport Photo | `/photo-tools/passport-photo` | ✅ Full |
+| 3 | Photo Resize | `/photo-tools/resize` | ✅ Full |
+| 4 | Photo Crop | `/photo-tools/crop` | ✅ Full |
+| 5 | Photo Compress | `/photo-tools/compress` | ✅ Full |
+| 6 | Photo Enhance | `/photo-tools/enhance` | ✅ Full (9 sliders + 5 presets) |
+| 7 | Face Restore | `/photo-tools/face-restore` | ✅ Pixel enhance + GFPGAN/CodeFormer placeholder |
+| 8 | Face Center | `/photo-tools/face-center` | ✅ Full |
+| 9 | Rotate & Flip | `/photo-tools/rotate-flip` | ✅ Full |
+| 10 | Mirror Tool | `/photo-tools/mirror` | ✅ Full |
+| 11 | Watermark | `/photo-tools/watermark` | ✅ Full |
+| 12 | Batch Resize | `/photo-tools/batch-resize` | ✅ Full (ZIP export) |
+| 13 | Image Converter | `/photo-tools/converter` | ✅ Full |
+| 14 | Metadata Viewer | `/photo-tools/metadata-viewer` | ✅ Full (EXIF) |
+| 15 | Duplicate Finder | `/photo-tools/duplicate-finder` | ✅ Full (dimension+size matching) |
+| 16 | DPI Converter | `/photo-tools/dpi-converter` | ✅ Full (72/150/300/600 DPI) |
+| 17 | Background Changer | `/photo-tools/background-changer` | ✅ Full (hex color picker) |
+| 18 | Blur Background | `/photo-tools/blur-background` | ✅ Full (BodyPix + Gaussian blur) |
+| 19 | Color Correction | `/photo-tools/color-correction` | ✅ Full (gamma, WB, tint, vibrance) |
+| 20 | Batch Rename | `/photo-tools/batch-rename` | ✅ Full (ZIP export) |
+| +4 | White/Blue/Red BG, Transparent PNG | various | ✅ Quick-access presets |
+
+**AI Architecture prepared for native integration:**
+- U2Net / BiRefNet / ISNet — background removal upgrade path
+- GFPGAN / CodeFormer / RestoreFormer — face restore upgrade path
+- MediaPipe / RetinaFace — face detection upgrade path
+- Real-ESRGAN — super-resolution upgrade path
+
 ## Restored Files
 
 When imported from zip, these files were missing and were reconstructed:
