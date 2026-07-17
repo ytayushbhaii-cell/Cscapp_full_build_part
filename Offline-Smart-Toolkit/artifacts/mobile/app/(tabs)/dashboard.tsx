@@ -53,7 +53,7 @@ export default function DashboardScreen() {
     if (tool?.route) router.push(tool.route as any);
   };
 
-  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
