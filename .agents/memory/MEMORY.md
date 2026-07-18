@@ -3,3 +3,4 @@
 - [Metro platform extension vs runtime guard](metro-platform-extension.md) — Metro statically analyzes require() regardless of runtime Platform.OS checks; use `.web.ts` / `.native.ts` extension files for libs with broken web builds.
 - [RN Slider removed from core](rn-community-slider.md) — React Native dropped bundled Slider; use `@react-native-community/slider` in this project.
 - [PNG encode in React Native](rn-png-encode.md) — No Canvas API in RN; use pure-JS `upng-js` + `base64-js` to encode raw RGBA buffers to PNG on both web and native.
+- [Segmentation resolution cap](segmentation-resolution-cap.md) — Must resize images to ≤1024px before guided-filter/SAM2 pipeline; full-res causes infinite loading on large photos.

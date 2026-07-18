@@ -74,15 +74,51 @@ export function warmUpSegmentation(): void {
 
 // ─── Image decode ─────────────────────────────────────────────────────────────
 
+/**
+ * Maximum pixel dimension used for ALL segmentation processing.
+ *
+ * Why 1024: guided filter + SAM2 refinement iterate every pixel multiple
+ * times synchronously on the JS thread. A 4032×3024 phone photo = 12M px —
+ * that can take 5–10 minutes and appears as "infinite loading". Capping at
+ * 1024 keeps every image under ~1M px and finishes in seconds.
+ *
+ * The output PNG is also at this resolution; 1024 px is more than enough
+ * for ID photos, product shots, and profile pictures.
+ */
+const MAX_PROCESSING_SIDE = 1024;
+
+/** Wraps a promise with a timeout; rejects with a friendly error message. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s. Try a smaller image.`)), ms)
+    ),
+  ]);
+}
+
 async function decodeToRGBA(uri: string): Promise<{
   tensor: tf.Tensor3D;
   pixels: Uint8ClampedArray;
   w: number;
   h: number;
 }> {
-  const jpeg = await convertFormat(uri, SaveFormat.JPEG, 0.97);
+  const jpeg = await convertFormat(uri, SaveFormat.JPEG, 0.92);
   const buf = await (await fetch(jpeg.uri)).arrayBuffer();
-  const tensor = decodeJpeg(new Uint8Array(buf)) as tf.Tensor3D;
+  let tensor = decodeJpeg(new Uint8Array(buf)) as tf.Tensor3D;
+
+  // Cap resolution so post-processing never hangs on large photos
+  const origH = tensor.shape[0], origW = tensor.shape[1];
+  const maxSide = Math.max(origW, origH);
+  if (maxSide > MAX_PROCESSING_SIDE) {
+    const scale = MAX_PROCESSING_SIDE / maxSide;
+    const newW = Math.max(1, Math.round(origW * scale));
+    const newH = Math.max(1, Math.round(origH * scale));
+    const resized = tf.image.resizeBilinear(tensor, [newH, newW]) as tf.Tensor3D;
+    tensor.dispose();
+    tensor = resized;
+  }
+
   const [h, w] = [tensor.shape[0], tensor.shape[1]];
   const pixelsTensor = tensor.div(255) as tf.Tensor3D;
   const pixels = await tf.browser.toPixels(pixelsTensor);
@@ -138,8 +174,10 @@ async function bodyPixCoarseAlpha(
  *   ONNX  → raw ONNX alpha → refineAlpha() → compositeWithSoftAlpha()
  *   BodyPix → binary mask → computeSoftAlpha() (includes refineAlpha internally)
  */
+const PROCESS_TIMEOUT_MS = 90_000;
+
 export async function segmentSubject(uri: string): Promise<SegmentationResult> {
-  const { tensor, pixels, w, h } = await decodeToRGBA(uri);
+  const { tensor, pixels, w, h } = await withTimeout(decodeToRGBA(uri), PROCESS_TIMEOUT_MS, 'Decode');
   try {
     const onnx = await tryOnnxAlpha(pixels, w, h);
     let alpha: Float32Array;
@@ -182,23 +220,26 @@ export async function removeBackgroundPro(
   uri: string,
   bgColor: [number, number, number] | null,
 ): Promise<{ uri: string; width: number; height: number }> {
-  const { tensor, pixels, w, h } = await decodeToRGBA(uri);
-  try {
-    const onnx = await tryOnnxAlpha(pixels, w, h);
-    let alpha: Float32Array;
+  const inner = async () => {
+    const { tensor, pixels, w, h } = await decodeToRGBA(uri);
+    try {
+      const onnx = await tryOnnxAlpha(pixels, w, h);
+      let alpha: Float32Array;
 
-    if (onnx) {
-      alpha = refineAlpha(onnx.rawAlpha, pixels, w, h);
-    } else {
-      alpha = await bodyPixCoarseAlpha(tensor, pixels, w, h);
+      if (onnx) {
+        alpha = refineAlpha(onnx.rawAlpha, pixels, w, h);
+      } else {
+        alpha = await bodyPixCoarseAlpha(tensor, pixels, w, h);
+      }
+
+      const rgba   = compositeWithSoftAlpha(pixels, alpha, w, h, bgColor);
+      const outUri = await writePngFromRGBA(rgba, w, h);
+      return { uri: outUri, width: w, height: h };
+    } finally {
+      tensor.dispose();
     }
-
-    const rgba   = compositeWithSoftAlpha(pixels, alpha, w, h, bgColor);
-    const outUri = await writePngFromRGBA(rgba, w, h);
-    return { uri: outUri, width: w, height: h };
-  } finally {
-    tensor.dispose();
-  }
+  };
+  return withTimeout(inner(), PROCESS_TIMEOUT_MS, 'Background removal');
 }
 
 /**
