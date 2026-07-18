@@ -33,10 +33,17 @@ Offline-Smart-Toolkit/
 │       │   │   ├── driving-license/ # 4 tools
 │       │   │   ├── passport/       # 4 tools
 │       │   │   └── pdf/            # 15 tools
-│       │   └── photo-tools/        # Photo editing tools
+│       │   ├── photo-tools/        # Photo editing tools (24 tools)
+│       │   └── id-card-tools/      # ID Card Generator (4 tools)
+│       │       ├── index.tsx       # Hub — card type selector
+│       │       ├── student.tsx     # Student ID (front + back, 5 templates)
+│       │       ├── employee.tsx    # Employee ID (front + back)
+│       │       ├── visitor.tsx     # Visitor Pass (single side)
+│       │       └── custom.tsx      # Fully customisable card
 │       ├── components/
 │       │   ├── document-tools/     # DocUploadWidget, DocResultActions, PrintLayoutPicker
-│       │   └── photo-tools/        # ToolScreenLayout, StatusBanner, etc.
+│       │   ├── photo-tools/        # ToolScreenLayout, StatusBanner, etc.
+│       │   └── id-card/            # IDCardStudent, IDCardEmployee, IDCardVisitor, IDCardCustom, TemplateSelector, PhotoPicker
 │       ├── lib/
 │       │   ├── features/documents/ # All document services
 │       │   │   ├── aadhaar/        # aadhaarService.ts
@@ -48,6 +55,12 @@ Offline-Smart-Toolkit/
 │       │   │   ├── ocr/            # ocrService.ts (tesseract.js v7 on web)
 │       │   │   ├── printUtils.ts   # ID card sheet PDF generation
 │       │   │   └── tools.ts        # All tool metadata registry
+│       │   ├── features/id-card/   # ID Card module
+│       │   │   ├── types.ts        # StudentIDData, EmployeeIDData, VisitorIDData, CustomIDData
+│       │   │   ├── templates.ts    # 5 templates (Modern/Corporate/School/Minimal/Premium)
+│       │   │   ├── tools.ts        # ID_CARD_TOOLS registry
+│       │   │   ├── db.ts           # AsyncStorage CRUD for saved cards
+│       │   │   └── ExportService.ts # PNG/JPG/PDF export (web + native)
 │       │   └── ai/                 # TF.js, ONNX runtime, AI services
 │       └── context/                # ThemeContext, AppContext, DrawerContext
 ├── lib/                            # Shared workspace libraries

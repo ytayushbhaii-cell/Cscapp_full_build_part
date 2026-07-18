@@ -27,6 +27,7 @@ const CATEGORY_ROUTES: Record<string, string> = {
   voter:      '/document-tools',
   passport:   '/document-tools',
   driving:    '/document-tools',
+  'id-card':  '/id-card-tools',
 };
 
 export default function ToolsScreen() {
