@@ -20,6 +20,7 @@ const basePath = (process.env.BASE_PATH || '/').replace(/\/+$/, '');
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.png': 'image/png',
@@ -33,6 +34,9 @@ const MIME_TYPES = {
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
   '.map': 'application/json',
+  // ORT WASM and ML model files
+  '.wasm': 'application/wasm',
+  '.onnx': 'application/octet-stream',
 };
 
 function getAppName() {

@@ -6,3 +6,4 @@
 - [PNG encode in React Native](rn-png-encode.md) — No Canvas API in RN; use pure-JS `upng-js` + `base64-js` to encode raw RGBA buffers to PNG on both web and native.
 - [Segmentation resolution cap](segmentation-resolution-cap.md) — Must resize images to ≤1024px before guided-filter/SAM2 pipeline; full-res causes infinite loading on large photos.
 - [onnxruntime-web Metro CJS fix](onnxruntime-web-metro-cjs-fix.md) — Metro rejects ORT ESM bundle (webpack-ignore dynamic import); redirect onnxruntime-web → dist/ort.min.js via resolveRequest.
+- [ORT 1.27 JSEP crash fix](ort-jsep-crash-fix.md) — use ort.wasm.min.js not ort.min.js; full bundle always fetches .jsep.mjs at init, crashing when file is absent.

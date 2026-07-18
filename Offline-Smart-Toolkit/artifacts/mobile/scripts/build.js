@@ -521,6 +521,45 @@ function updateManifests(manifests, timestamp, baseUrl, assetsByHash) {
   console.log('Manifests updated');
 }
 
+/**
+ * Copies ORT WASM/MJS runtime files and the BiRefNet model from public/ into
+ * static-build/ so the production server can serve them.
+ *
+ * Must be called BEFORE Metro starts so the files are in place when the
+ * bundler resolves them during export.
+ */
+function copyStaticAssets() {
+  console.log('Copying ORT WASM/MJS and model files to static-build root...');
+
+  const publicDir    = path.join(projectRoot, 'public');
+  const staticBuild  = path.join(projectRoot, 'static-build');
+
+  // ORT WASM + MJS runtime files — all variants needed by ORT 1.27+
+  const ortWasmSrc  = path.join(publicDir, 'ort-wasm');
+  const ortWasmDest = path.join(staticBuild, 'ort-wasm');
+  fs.mkdirSync(ortWasmDest, { recursive: true });
+  for (const file of fs.readdirSync(ortWasmSrc)) {
+    fs.copyFileSync(path.join(ortWasmSrc, file), path.join(ortWasmDest, file));
+    console.log(`  ✓ ort-wasm/${file}`);
+  }
+
+  // ORT JS bundle (WASM-only, loaded via <script> tag)
+  const ortJs = 'ort.min.js';
+  fs.copyFileSync(path.join(publicDir, ortJs), path.join(staticBuild, ortJs));
+  console.log(`  ✓ ${ortJs}`);
+
+  // BiRefNet ONNX model
+  const modelsSrc  = path.join(publicDir, 'models');
+  const modelsDest = path.join(staticBuild, 'models');
+  fs.mkdirSync(modelsDest, { recursive: true });
+  for (const file of fs.readdirSync(modelsSrc)) {
+    fs.copyFileSync(path.join(modelsSrc, file), path.join(modelsDest, file));
+    console.log(`  ✓ models/${file}`);
+  }
+
+  console.log('Static assets copied.');
+}
+
 async function main() {
   console.log('Building static Expo Go deployment...');
 
@@ -532,6 +571,7 @@ async function main() {
   const timestamp = `${Date.now()}-${process.pid}`;
 
   prepareDirectories(timestamp);
+  copyStaticAssets();   // ← copy ORT + model files before Metro starts
   clearMetroCache();
 
   await startMetro(domain, expoPublicReplId);

@@ -176,14 +176,23 @@ async function loadSession(): Promise<OnnxSession | null> {
       return null;
     }
 
-    // ── Step 3: Configure WASM paths ──────────────────────────────────────────
-    // ORT auto-selects:
+    // ── Step 3: Configure WASM paths and disable JSEP/WebGPU ─────────────────
+    // ORT 1.27+ tries to dynamically import ort-wasm-simd-threaded.jsep.mjs
+    // (WebGPU/JSEP backend) even when only 'wasm' EP is requested. Explicitly
+    // disabling JSEP prevents that fetch so the pure-WASM path is used.
+    //
+    // ORT then auto-selects the right WASM variant:
     //   - ort-wasm-simd-threaded.wasm         if SharedArrayBuffer is available
     //   - ort-wasm-simd-threaded.asyncify.wasm if not (Replit dev, no COOP/COEP headers)
     // Do NOT force numThreads — let ORT auto-detect based on SharedArrayBuffer
     // availability. Forcing 1 causes ORT to look for a non-existent non-threaded
     // WASM file; auto-detect correctly uses asyncify when threads aren't available.
     ort.env.wasm.wasmPaths = getWasmDir();
+    // Belt-and-suspenders: disable JSEP (WebGPU execution provider) so ORT
+    // never fetches .jsep.mjs regardless of the JS bundle used.
+    if (ort.env.webgpu !== undefined) {
+      try { (ort.env as any).webgpu = { disabled: true }; } catch { /* read-only on some builds */ }
+    }
 
     // ── Step 4: Create ONNX inference session ─────────────────────────────────
     const session = await ort.InferenceSession.create(modelUrl, {
