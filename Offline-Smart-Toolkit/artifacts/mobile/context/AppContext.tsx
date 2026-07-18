@@ -6,6 +6,7 @@ import { ALL_QR_TOOLS } from '@/lib/features/qr/tools';
 import { ALL_SIG_TOOLS } from '@/lib/features/signature/tools';
 import { ALL_ID_CARD_TOOLS, ID_CARD_COLOR } from '@/lib/features/id-card/tools';
 import { PRINT_TOOLS, PRINT_COLOR } from '@/lib/printTools/tools';
+import { UTILITY_TOOLS, UTILITY_COLOR } from '@/lib/features/utilities/tools';
 
 export interface RecentFile {
   id: string;
@@ -126,6 +127,16 @@ const PRINT_TOOL_ENTRIES: Tool[] = PRINT_TOOLS.map((t) => ({
   route: t.route,
 }));
 
+const UTILITY_TOOL_ENTRIES: Tool[] = UTILITY_TOOLS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: 'Utility Tools',
+  iconName: t.iconName,
+  color: t.color,
+  description: t.description,
+  route: t.route,
+}));
+
 export const ALL_TOOLS: Tool[] = [
   ...PHOTO_TOOL_ENTRIES,
   ...DOC_TOOL_ENTRIES,
@@ -133,6 +144,7 @@ export const ALL_TOOLS: Tool[] = [
   ...SIG_TOOL_ENTRIES,
   ...ID_CARD_TOOL_ENTRIES,
   ...PRINT_TOOL_ENTRIES,
+  ...UTILITY_TOOL_ENTRIES,
 ];
 
 export const ALL_CATEGORIES: ToolCategory[] = [
@@ -146,7 +158,7 @@ export const ALL_CATEGORIES: ToolCategory[] = [
   { id: 'qr',       name: 'QR & Barcode',           iconName: 'qrcode-scan',                   color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: ALL_QR_TOOLS.length },
   { id: 'signature',name: 'Signature & Stamp',      iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: ALL_SIG_TOOLS.length },
   { id: 'id-card',  name: 'ID Card Generator',      iconName: 'card-account-details-outline', color: ID_CARD_COLOR, gradient: [ID_CARD_COLOR, '#4F46E5'], count: ALL_ID_CARD_TOOLS.length },
-  { id: 'utilities',name: 'Utilities',              iconName: 'tools',                         color: '#64748B', gradient: ['#64748B', '#475569'], count: 7  },
+  { id: 'utilities',name: 'Utility Tools',           iconName: 'calculator-variant-outline',    color: UTILITY_COLOR, gradient: [UTILITY_COLOR, '#0284C7'], count: UTILITY_TOOLS.length },
   { id: 'print',    name: 'Print Layout',           iconName: 'printer',                       color: PRINT_COLOR, gradient: [PRINT_COLOR, '#4F46E5'], count: PRINT_TOOLS.length },
 ];
 

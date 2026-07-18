@@ -33,6 +33,7 @@ const CATEGORY_ROUTES: Record<string, string> = {
   barcode:    '/qr-tools',
   signature:  '/signature-tools',
   stamp:      '/signature-tools',
+  utilities:  '/utility-tools',
 };
 
 export default function ToolsScreen() {
