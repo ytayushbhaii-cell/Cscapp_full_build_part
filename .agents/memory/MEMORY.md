@@ -5,3 +5,4 @@
 - [RN Slider removed from core](rn-community-slider.md) — React Native dropped bundled Slider; use `@react-native-community/slider` in this project.
 - [PNG encode in React Native](rn-png-encode.md) — No Canvas API in RN; use pure-JS `upng-js` + `base64-js` to encode raw RGBA buffers to PNG on both web and native.
 - [Segmentation resolution cap](segmentation-resolution-cap.md) — Must resize images to ≤1024px before guided-filter/SAM2 pipeline; full-res causes infinite loading on large photos.
+- [onnxruntime-web Metro CJS fix](onnxruntime-web-metro-cjs-fix.md) — Metro rejects ORT ESM bundle (webpack-ignore dynamic import); redirect onnxruntime-web → dist/ort.min.js via resolveRequest.
