@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, {
+  createContext, useContext, useState, useEffect, useCallback, ReactNode,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PHOTO_TOOLS } from '@/lib/photoTools/tools';
 import { ALL_DOC_TOOLS } from '@/lib/features/documents/tools';
@@ -7,6 +9,7 @@ import { ALL_SIG_TOOLS } from '@/lib/features/signature/tools';
 import { ALL_ID_CARD_TOOLS, ID_CARD_COLOR } from '@/lib/features/id-card/tools';
 import { PRINT_TOOLS, PRINT_COLOR } from '@/lib/printTools/tools';
 import { UTILITY_TOOLS, UTILITY_COLOR } from '@/lib/features/utilities/tools';
+import { recordToolUsage, getTopTools } from '@/lib/features/usage/UsageService';
 
 export interface RecentFile {
   id: string;
@@ -23,7 +26,6 @@ export interface Tool {
   iconName: string;
   color: string;
   description: string;
-  /** Present when the tool has a real screen to navigate to; absent tools stay inert. */
   route?: string;
 }
 
@@ -36,105 +38,72 @@ export interface ToolCategory {
   count: number;
 }
 
+const RECENT_KEY   = '@csc_recent_files';
+const FAV_KEY      = '@csc_favorites';
+const MAX_RECENT   = 50;
+
 interface AppContextType {
-  recentFiles: RecentFile[];
-  favoriteIds: string[];
+  recentFiles:    RecentFile[];
+  favoriteIds:    string[];
+  topToolIds:     string[];
   toggleFavorite: (toolId: string) => void;
-  isFavorite: (toolId: string) => boolean;
-  tools: Tool[];
-  categories: ToolCategory[];
+  isFavorite:     (toolId: string) => boolean;
+  addRecentFile:  (entry: Omit<RecentFile, 'id'>) => Promise<void>;
+  recordUsage:    (toolId: string) => Promise<void>;
+  refreshTopTools:() => Promise<void>;
+  tools:          Tool[];
+  categories:     ToolCategory[];
   stats: {
-    totalTools: number;
+    totalTools:       number;
     recentFilesCount: number;
-    favoritesCount: number;
-    storageUsed: string;
+    favoritesCount:   number;
+    storageUsed:      string;
   };
 }
 
-const DUMMY_RECENT: RecentFile[] = [
-  { id: '1', fileName: 'photo_portrait.jpg', toolUsed: 'Background Remove', date: '2024-01-15', status: 'Completed' },
-  { id: '2', fileName: 'passport_john.jpg', toolUsed: 'Passport Photo', date: '2024-01-15', status: 'Completed' },
-  { id: '3', fileName: 'docs_merge.pdf', toolUsed: 'PDF Merge', date: '2024-01-14', status: 'Completed' },
-  { id: '4', fileName: 'aadhaar_copy.pdf', toolUsed: 'Aadhaar Tools', date: '2024-01-14', status: 'Completed' },
-  { id: '5', fileName: 'qrcode_shop.png', toolUsed: 'QR Generator', date: '2024-01-13', status: 'Completed' },
-  { id: '6', fileName: 'invoice_jan.pdf', toolUsed: 'PDF Compress', date: '2024-01-13', status: 'Completed' },
-  { id: '7', fileName: 'signature_001.png', toolUsed: 'Signature Tool', date: '2024-01-12', status: 'Completed' },
-  { id: '8', fileName: 'pan_scan.jpg', toolUsed: 'PAN Tools', date: '2024-01-12', status: 'Completed' },
-];
+// ─── Tool entries ─────────────────────────────────────────────────────────────
 
 const PHOTO_TOOL_ENTRIES: Tool[] = PHOTO_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: 'Photo Tools',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  id: t.id, name: t.name, category: 'Photo Tools',
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const DOC_TOOL_ENTRIES: Tool[] = ALL_DOC_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: t.category === 'aadhaar' ? 'Aadhaar Tools'
-    : t.category === 'pan' ? 'PAN Tools'
-    : t.category === 'voter' ? 'Voter ID Tools'
+  id: t.id, name: t.name,
+  category:
+    t.category === 'aadhaar'         ? 'Aadhaar Tools'
+    : t.category === 'pan'           ? 'PAN Tools'
+    : t.category === 'voter'         ? 'Voter ID Tools'
     : t.category === 'driving-license' ? 'Driving License Tools'
-    : t.category === 'passport' ? 'Passport Tools'
+    : t.category === 'passport'      ? 'Passport Tools'
     : 'PDF Tools',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const QR_TOOL_ENTRIES: Tool[] = ALL_QR_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: t.id.startsWith('barcode') ? 'QR & Barcode' : 'QR & Barcode',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  id: t.id, name: t.name, category: 'QR & Barcode',
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const SIG_TOOL_ENTRIES: Tool[] = ALL_SIG_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
+  id: t.id, name: t.name,
   category: t.id.startsWith('stamp') ? 'Stamp Tools' : 'Signature Tools',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const ID_CARD_TOOL_ENTRIES: Tool[] = ALL_ID_CARD_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: 'ID Card Generator',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  id: t.id, name: t.name, category: 'ID Card Generator',
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const PRINT_TOOL_ENTRIES: Tool[] = PRINT_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: 'Print Tools',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  id: t.id, name: t.name, category: 'Print Tools',
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 const UTILITY_TOOL_ENTRIES: Tool[] = UTILITY_TOOLS.map((t) => ({
-  id: t.id,
-  name: t.name,
-  category: 'Utility Tools',
-  iconName: t.iconName,
-  color: t.color,
-  description: t.description,
-  route: t.route,
+  id: t.id, name: t.name, category: 'Utility Tools',
+  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
 }));
 
 export const ALL_TOOLS: Tool[] = [
@@ -157,55 +126,115 @@ export const ALL_CATEGORIES: ToolCategory[] = [
   { id: 'pdf',      name: 'PDF Tools',              iconName: 'file-pdf-box',                  color: '#EF4444', gradient: ['#EF4444', '#DC2626'], count: 15 },
   { id: 'qr',       name: 'QR & Barcode',           iconName: 'qrcode-scan',                   color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: ALL_QR_TOOLS.length },
   { id: 'signature',name: 'Signature & Stamp',      iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: ALL_SIG_TOOLS.length },
-  { id: 'id-card',  name: 'ID Card Generator',      iconName: 'card-account-details-outline', color: ID_CARD_COLOR, gradient: [ID_CARD_COLOR, '#4F46E5'], count: ALL_ID_CARD_TOOLS.length },
-  { id: 'utilities',name: 'Utility Tools',           iconName: 'calculator-variant-outline',    color: UTILITY_COLOR, gradient: [UTILITY_COLOR, '#0284C7'], count: UTILITY_TOOLS.length },
-  { id: 'print',    name: 'Print Layout',           iconName: 'printer',                       color: PRINT_COLOR, gradient: [PRINT_COLOR, '#4F46E5'], count: PRINT_TOOLS.length },
+  { id: 'id-card',  name: 'ID Card Generator',      iconName: 'card-account-details-outline',  color: ID_CARD_COLOR, gradient: [ID_CARD_COLOR, '#4F46E5'], count: ALL_ID_CARD_TOOLS.length },
+  { id: 'utilities',name: 'Utility Tools',          iconName: 'calculator-variant-outline',    color: UTILITY_COLOR, gradient: [UTILITY_COLOR, '#0284C7'], count: UTILITY_TOOLS.length },
+  { id: 'print',    name: 'Print Layout',           iconName: 'printer',                       color: PRINT_COLOR,   gradient: [PRINT_COLOR, '#4F46E5'],   count: PRINT_TOOLS.length },
 ];
 
+// ─── Context ──────────────────────────────────────────────────────────────────
+
 const AppContext = createContext<AppContextType>({
-  recentFiles: DUMMY_RECENT,
-  favoriteIds: [],
+  recentFiles:    [],
+  favoriteIds:    [],
+  topToolIds:     [],
   toggleFavorite: () => {},
-  isFavorite: () => false,
-  tools: ALL_TOOLS,
+  isFavorite:     () => false,
+  addRecentFile:  async () => {},
+  recordUsage:    async () => {},
+  refreshTopTools: async () => {},
+  tools:      ALL_TOOLS,
   categories: ALL_CATEGORIES,
-  stats: { totalTools: ALL_TOOLS.length, recentFilesCount: DUMMY_RECENT.length, favoritesCount: 0, storageUsed: '12.4 MB' },
+  stats: { totalTools: ALL_TOOLS.length, recentFilesCount: 0, favoritesCount: 0, storageUsed: '0 MB' },
 });
 
-export function AppProvider({ children }: { children: ReactNode }) {
-  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [favoriteIds,  setFavoriteIds]  = useState<string[]>([]);
+  const [recentFiles,  setRecentFiles]  = useState<RecentFile[]>([]);
+  const [topToolIds,   setTopToolIds]   = useState<string[]>([]);
+
+  // Load persisted data on mount
   useEffect(() => {
-    AsyncStorage.getItem('@csc_favorites').then((val) => {
-      if (val) setFavoriteIds(JSON.parse(val));
+    Promise.all([
+      AsyncStorage.getItem(FAV_KEY),
+      AsyncStorage.getItem(RECENT_KEY),
+    ]).then(([favRaw, recentRaw]) => {
+      if (favRaw)    setFavoriteIds(JSON.parse(favRaw));
+      if (recentRaw) setRecentFiles(JSON.parse(recentRaw));
+    });
+
+    // Load top tools separately (non-blocking)
+    getTopTools(10).then((top) => setTopToolIds(top.map((t) => t.toolId)));
+  }, []);
+
+  // ── Favorites ─────────────────────────────────────────────────────────────
+
+  const toggleFavorite = useCallback(async (toolId: string) => {
+    setFavoriteIds((prev) => {
+      const updated = prev.includes(toolId)
+        ? prev.filter((id) => id !== toolId)
+        : [...prev, toolId];
+      AsyncStorage.setItem(FAV_KEY, JSON.stringify(updated));
+      return updated;
     });
   }, []);
 
-  const toggleFavorite = async (toolId: string) => {
-    const updated = favoriteIds.includes(toolId)
-      ? favoriteIds.filter((id) => id !== toolId)
-      : [...favoriteIds, toolId];
-    setFavoriteIds(updated);
-    await AsyncStorage.setItem('@csc_favorites', JSON.stringify(updated));
-  };
+  const isFavorite = useCallback((toolId: string) => favoriteIds.includes(toolId), [favoriteIds]);
 
-  const isFavorite = (toolId: string) => favoriteIds.includes(toolId);
+  // ── Recent Files ──────────────────────────────────────────────────────────
+
+  const addRecentFile = useCallback(async (entry: Omit<RecentFile, 'id'>) => {
+    const newEntry: RecentFile = {
+      ...entry,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    };
+    setRecentFiles((prev) => {
+      // Remove duplicates by fileName + toolUsed, then prepend
+      const dedupe = prev.filter(
+        (r) => !(r.fileName === newEntry.fileName && r.toolUsed === newEntry.toolUsed),
+      );
+      const updated = [newEntry, ...dedupe].slice(0, MAX_RECENT);
+      AsyncStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  // ── Usage tracking ────────────────────────────────────────────────────────
+
+  const recordUsage = useCallback(async (toolId: string) => {
+    await recordToolUsage(toolId);
+    // Refresh top tools after recording
+    const top = await getTopTools(10);
+    setTopToolIds(top.map((t) => t.toolId));
+  }, []);
+
+  const refreshTopTools = useCallback(async () => {
+    const top = await getTopTools(10);
+    setTopToolIds(top.map((t) => t.toolId));
+  }, []);
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
 
   const stats = {
-    totalTools: ALL_TOOLS.length,
-    recentFilesCount: DUMMY_RECENT.length,
-    favoritesCount: favoriteIds.length,
-    storageUsed: '12.4 MB',
+    totalTools:       ALL_TOOLS.length,
+    recentFilesCount: recentFiles.length,
+    favoritesCount:   favoriteIds.length,
+    storageUsed:      '—',
   };
 
   return (
     <AppContext.Provider
       value={{
-        recentFiles: DUMMY_RECENT,
+        recentFiles,
         favoriteIds,
+        topToolIds,
         toggleFavorite,
         isFavorite,
-        tools: ALL_TOOLS,
+        addRecentFile,
+        recordUsage,
+        refreshTopTools,
+        tools:      ALL_TOOLS,
         categories: ALL_CATEGORIES,
         stats,
       }}

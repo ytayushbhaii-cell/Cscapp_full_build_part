@@ -14,19 +14,25 @@ import { useColors } from '@/hooks/useColors';
 import { DRAWER_WIDTH, useDrawer } from '@/context/DrawerContext';
 
 const NAV_ITEMS = [
-  { label: 'Dashboard', icon: 'view-dashboard-outline', route: '/dashboard' },
-  { label: 'Tools', icon: 'tools', route: '/tools' },
-  { label: 'Photo Tools', icon: 'image-multiple', route: '/photo-tools' },
- 
-  { label: 'Favorites', icon: 'heart-outline', route: '/favorites' },
-  { label: 'Settings', icon: 'cog-outline', route: '/settings' },
+  { label: 'Dashboard',       icon: 'view-dashboard-outline',  route: '/dashboard' },
+  { label: 'Tools',           icon: 'tools',                   route: '/tools' },
+  { label: 'Photo Tools',     icon: 'image-multiple',          route: '/photo-tools' },
+  { label: 'Search',          icon: 'magnify',                 route: '/search' },
+  { label: 'Favorites',       icon: 'heart-outline',           route: '/favorites' },
+  { label: 'Recent Files',    icon: 'clock-outline',           route: '/recent' },
+  { label: 'Most Used',       icon: 'chart-bar',               route: '/most-used' },
+  { label: 'History',         icon: 'history',                 route: '/history' },
+  { label: 'Settings',        icon: 'cog-outline',             route: '/settings' },
 ] as const;
+
+// Visual separators — inserted before these route indices
+const SEPARATORS_BEFORE: Set<number> = new Set([3, 8]);
 
 export function AppDrawer() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { isOpen, closeDrawer, translateX, overlayOpacity } = useDrawer();
-  const router = useRouter();
+  const router   = useRouter();
   const pathname = usePathname();
 
   if (!isOpen) return null;
@@ -67,17 +73,10 @@ export function AppDrawer() {
             <MaterialCommunityIcons name="tools" size={22} color="#FFFFFF" />
           </View>
           <View style={styles.headerText}>
-            <Text
-              style={[styles.appName, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}
-            >
+            <Text style={[styles.appName, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
               CSC Smart Toolkit
             </Text>
-            <Text
-              style={[
-                styles.appTagline,
-                { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' },
-              ]}
-            >
+            <Text style={[styles.appTagline, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
               Complete Offline Toolkit
             </Text>
           </View>
@@ -87,53 +86,53 @@ export function AppDrawer() {
 
         {/* Navigation */}
         <View style={styles.navList}>
-          {NAV_ITEMS.map((item) => {
+          {NAV_ITEMS.map((item, index) => {
             const isActive =
               pathname === item.route ||
               (item.route === '/dashboard' && (pathname === '/' || pathname === ''));
+
             return (
-              <TouchableOpacity
-                key={item.route}
-                style={[
-                  styles.navItem,
-                  isActive && {
-                    backgroundColor: colors.accent,
-                    borderLeftColor: colors.primary,
-                    borderLeftWidth: 3,
-                  },
-                ]}
-                onPress={() => navigate(item.route)}
-                activeOpacity={0.7}
-              >
-                <MaterialCommunityIcons
-                  name={item.icon as any}
-                  size={22}
-                  color={isActive ? colors.primary : colors.mutedForeground}
-                />
-                <Text
+              <React.Fragment key={item.route}>
+                {SEPARATORS_BEFORE.has(index) && (
+                  <View style={[styles.miniDivider, { backgroundColor: colors.border }]} />
+                )}
+                <TouchableOpacity
                   style={[
-                    styles.navLabel,
-                    {
-                      color: isActive ? colors.primary : colors.foreground,
-                      fontFamily: isActive ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                    styles.navItem,
+                    isActive && {
+                      backgroundColor: colors.accent,
+                      borderLeftColor: colors.primary,
+                      borderLeftWidth: 3,
                     },
                   ]}
+                  onPress={() => navigate(item.route)}
+                  activeOpacity={0.7}
                 >
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
+                  <MaterialCommunityIcons
+                    name={item.icon as any}
+                    size={20}
+                    color={isActive ? colors.primary : colors.mutedForeground}
+                  />
+                  <Text
+                    style={[
+                      styles.navLabel,
+                      {
+                        color: isActive ? colors.primary : colors.foreground,
+                        fontFamily: isActive ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                      },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              </React.Fragment>
             );
           })}
         </View>
 
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
-        <Text
-          style={[
-            styles.version,
-            { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' },
-          ]}
-        >
+        <Text style={[styles.version, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
           Version 1.0.0 • 100% Offline
         </Text>
       </Animated.View>
@@ -144,9 +143,7 @@ export function AppDrawer() {
 const styles = StyleSheet.create({
   drawer: {
     position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
+    left: 0, top: 0, bottom: 0,
     width: DRAWER_WIDTH,
     paddingHorizontal: 16,
     elevation: 16,
@@ -157,34 +154,24 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
   },
   drawerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-    paddingHorizontal: 4,
+    flexDirection: 'row', alignItems: 'center',
+    gap: 12, marginBottom: 16, paddingHorizontal: 4,
   },
   logoBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 42, height: 42, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
   },
   headerText: { flex: 1 },
-  appName: { fontSize: 13, lineHeight: 18 },
+  appName:    { fontSize: 13, lineHeight: 18 },
   appTagline: { fontSize: 11, marginTop: 2 },
-  divider: { height: 1, marginVertical: 8 },
-  navList: { gap: 2, marginVertical: 6 },
+  divider:    { height: 1, marginVertical: 8 },
+  miniDivider:{ height: 1, marginVertical: 4 },
+  navList:    { gap: 1, marginVertical: 4 },
   navItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 10,
-    borderLeftWidth: 0,
-    borderLeftColor: 'transparent',
+    flexDirection: 'row', alignItems: 'center',
+    gap: 12, paddingHorizontal: 12, paddingVertical: 11,
+    borderRadius: 10, borderLeftWidth: 0, borderLeftColor: 'transparent',
   },
-  navLabel: { fontSize: 15, flex: 1 },
-  version: { fontSize: 11, textAlign: 'center', marginTop: 8 },
+  navLabel: { fontSize: 14, flex: 1 },
+  version:  { fontSize: 11, textAlign: 'center', marginTop: 8 },
 });

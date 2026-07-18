@@ -16,8 +16,18 @@ The workflow "Start application" handles this. The app runs at http://localhost:
 - **OCR**: tesseract.js v7 (web), architecture stub for native
 - **PDF Rendering**: pdfjs-dist (web) for PDF → Image conversion
 - **Image Processing**: expo-image-manipulator
-- **State**: React Context (ThemeContext, AppContext, DrawerContext)
-- **Storage**: AsyncStorage for favorites/theme; expo-sqlite for DB
+- **State**: React Context (ThemeContext, AppContext, SettingsContext, DrawerContext)
+- **Storage**: AsyncStorage for favorites/theme/settings/search-history/usage; expo-sqlite for tool history DB
+
+## Part 10 — Search, History & Analytics Modules (added)
+- **Search screen** (`app/(tabs)/search.tsx`) — full-page search across all tools/categories, persisted search history, instant results
+- **History screen** (`app/(tabs)/history.tsx`) — processing history from SQLite (QR/Barcode/Signature/Stamp); web shows empty state with note
+- **Most Used Tools screen** (`app/(tabs)/most-used.tsx`) — top-10 ranked tool usage with animated rank badges; reset option
+- **SearchService** (`lib/features/search/SearchService.ts`) — AsyncStorage search history (max 12 items, deduped)
+- **UsageService** (`lib/features/usage/UsageService.ts`) — tool usage counts via AsyncStorage; `recordToolUsage`, `getTopTools`
+- **AppContext** — replaced DUMMY_RECENT with real AsyncStorage data; added `addRecentFile`, `recordUsage`, `topToolIds`
+- **SearchModal** — now persists search history and records tool usage on selection
+- **AppDrawer** — expanded with Search, Recent Files, Most Used, History nav items (with section dividers)
 
 ## Project Structure
 ```
