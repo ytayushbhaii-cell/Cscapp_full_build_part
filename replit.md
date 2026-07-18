@@ -1,129 +1,77 @@
-# CSC Smart Toolkit
+# CSC Smart Toolkit — Replit Project
 
-An offline-first toolkit for CSC (Common Service Centre) & Cyber Cafe workers. Offers photo tools, PDF utilities, QR/barcode generation, Aadhaar/PAN document services, and more — all running 100% offline.
+## Overview
 
-## Features
+An offline-first mobile toolkit (Expo / React Native) for CSC Centers, Cyber Cafes, Photo Studios, and Offices. All processing happens 100% on-device — no internet, no cloud, no API calls required.
 
-- **Photo Tools** — background removal, resize, compress, format conversion, watermark, and more
-- **Document Tools** — Aadhaar, PAN, Voter ID, Driving License, Passport, PDF merge/split/compress
-- **QR & Barcode** — generate and scan QR codes, barcodes
-- **Signature & Stamp** — digital signatures, stamp creation
-- **ID Card Generator** — custom ID card layouts
-- **Print Layout System** — A4 layout, passport photo sheets (2/4/6/8/12 photos), multiple copies, custom paper sizes, print preview with zoom/rotate and PDF export
+### Stack
+- **Framework:** Expo SDK 54, expo-router v6 (file-based navigation)
+- **UI:** React Native Web + react-native-reanimated, MaterialCommunityIcons, expo-linear-gradient
+- **AI / ML:** TensorFlow.js (CPU + WebGL backends), ONNX Runtime Web (wasm)
+- **PDF:** pdf-lib (pure-JS, offline)
+- **OCR:** Tesseract.js (offline WASM)
+- **DB:** expo-sqlite (native) / no-op web stubs
+- **State:** React Context (AppContext, ThemeContext, DrawerContext)
+- **Package manager:** pnpm (workspace monorepo)
 
-## Architecture
+### Monorepo layout
+```
+Offline-Smart-Toolkit/
+  artifacts/
+    mobile/       ← Expo app (the main thing)
+    api-server/   ← Express + Drizzle ORM backend (pre-built, dist/)
+```
 
-This is a **pnpm monorepo** located under `Offline-Smart-Toolkit/`.
+## How to run
 
-| Package | Path | Description |
+Workflow: **Start application**
+```
+cd Offline-Smart-Toolkit/artifacts/mobile && PORT=5000 EXPO_PUBLIC_PORT=5000 pnpm exec expo start --web --port 5000
+```
+
+The web build opens on port 5000. Native (Android/iOS) is built separately via `expo run:android` / `expo run:ios`.
+
+## Feature modules
+
+| Module | Route | Status |
 |---|---|---|
-| `@workspace/mobile` | `artifacts/mobile` | Expo React Native app (iOS/Android/Web) |
-| `@workspace/api-server` | `artifacts/api-server` | Express 5 API server (pre-compiled to `dist/`) |
-| `@workspace/mockup-sandbox` | `artifacts/mockup-sandbox` | Vite UI component sandbox |
-| `@workspace/api-client-react` | `lib/api-client-react` | Shared API client with React Query |
-| `@workspace/api-zod` | `lib/api-zod` | Shared Zod schemas |
-| `@workspace/db` | `lib/db` | Drizzle ORM database layer (PostgreSQL) |
+| Photo Tools (BG remove, segmentation, etc.) | `/photo-tools` | ✅ |
+| Document Tools (Aadhaar, PAN, Voter, PDF) | `/document-tools` | ✅ |
+| QR & Barcode | `/qr-tools` | ✅ |
+| Signature & Stamp | `/signature-tools` | ✅ |
+| ID Card Generator | `/id-card-tools` | ✅ |
+| **Print Layout System** | `/print-tools` | ✅ Part 7 |
+| Barcode Tools | `/barcode-tools` | ✅ |
 
-## How to Run
+## Print Layout System (Part 7)
 
-**Development (web preview):**
-```
-cd Offline-Smart-Toolkit/artifacts/mobile
-pnpm exec expo start --web --port 5000
-```
-This is configured as the default "Start application" workflow.
+All files under `lib/printTools/` and `app/print-tools/`.
 
-**API server** (needs `DATABASE_URL`):
-```
-cd Offline-Smart-Toolkit/artifacts/api-server
-node dist/index.mjs
-```
+### Screens
+- `app/print-tools/index.tsx` — Home (hero, search, recent prints)
+- `app/print-tools/a4-layout.tsx` — A4 Layout Tool
+- `app/print-tools/passport-sheet.tsx` — Passport Sheet Generator (2/4/6/8/12 photos)
+- `app/print-tools/multiple-copies.tsx` — Multiple Copies Tool
+- `app/print-tools/custom-paper.tsx` — Custom Paper Size Tool
+- `app/print-tools/print-preview.tsx` — Print Preview (zoom, rotate, margin)
 
-**Mockup sandbox:**
-```
-cd Offline-Smart-Toolkit/artifacts/mockup-sandbox
-pnpm run dev
-```
+### Services
+- `lib/printTools/LayoutService.ts` — All layout maths (mm-based, 100% offline)
+- `lib/printTools/ExportService.ts` — PDF / PNG / JPG export
+- `lib/printTools/PrintService.ts` — High-level job orchestrator
+- `lib/printTools/PreviewService.ts` — mm → pixel conversion for previews
+- `lib/printTools/db.ts` — SQLite persistence (native)
+- `lib/printTools/db.web.ts` — No-op web stub
 
-## Package Manager
+## Key architecture notes
 
-**pnpm** (v10). Always run commands from within `Offline-Smart-Toolkit/` or use the `--filter` flag:
-```
-cd Offline-Smart-Toolkit && pnpm install
-```
+- **Web stubs:** Every SQLite-backed `db.ts` has a `db.web.ts` no-op sibling. Metro picks `.web.ts` automatically on web builds.
+- **Metro config:** `metro.config.js` has `resolveRequest` overrides to force pdf-lib → CJS and onnxruntime-web → wasm-only bundle.
+- **Offline guarantee:** No `fetch()` calls to external URLs in any tool screen. All AI models are bundled in `assets/models/` or `assets/ort-wasm/`.
 
-## Photo Tools Module (24 tools total)
+## User preferences
 
-All tools are 100% offline — no API, no internet, no Firebase.
-
-| # | Tool | Route | Status |
-|---|------|-------|--------|
-| 1 | Background Remove | `/photo-tools/background-remove` | ✅ Full (BodyPix segmentation) |
-| 2 | Passport Photo | `/photo-tools/passport-photo` | ✅ Full |
-| 3 | Photo Resize | `/photo-tools/resize` | ✅ Full |
-| 4 | Photo Crop | `/photo-tools/crop` | ✅ Full |
-| 5 | Photo Compress | `/photo-tools/compress` | ✅ Full |
-| 6 | Photo Enhance | `/photo-tools/enhance` | ✅ Full (9 sliders + 5 presets) |
-| 7 | Face Restore | `/photo-tools/face-restore` | ✅ Pixel enhance + GFPGAN/CodeFormer placeholder |
-| 8 | Face Center | `/photo-tools/face-center` | ✅ Full |
-| 9 | Rotate & Flip | `/photo-tools/rotate-flip` | ✅ Full |
-| 10 | Mirror Tool | `/photo-tools/mirror` | ✅ Full |
-| 11 | Watermark | `/photo-tools/watermark` | ✅ Full |
-| 12 | Batch Resize | `/photo-tools/batch-resize` | ✅ Full (ZIP export) |
-| 13 | Image Converter | `/photo-tools/converter` | ✅ Full |
-| 14 | Metadata Viewer | `/photo-tools/metadata-viewer` | ✅ Full (EXIF) |
-| 15 | Duplicate Finder | `/photo-tools/duplicate-finder` | ✅ Full (dimension+size matching) |
-| 16 | DPI Converter | `/photo-tools/dpi-converter` | ✅ Full (72/150/300/600 DPI) |
-| 17 | Background Changer | `/photo-tools/background-changer` | ✅ Full (hex color picker) |
-| 18 | Blur Background | `/photo-tools/blur-background` | ✅ Full (BodyPix + Gaussian blur) |
-| 19 | Color Correction | `/photo-tools/color-correction` | ✅ Full (gamma, WB, tint, vibrance) |
-| 20 | Batch Rename | `/photo-tools/batch-rename` | ✅ Full (ZIP export) |
-| +4 | White/Blue/Red BG, Transparent PNG | various | ✅ Quick-access presets |
-
-## Background Remover Pipeline (Upgraded)
-
-The background removal engine now runs a professional 6-stage pipeline (comparable to Remove.bg / Adobe Express):
-
-| Stage | Algorithm | File |
-|-------|-----------|------|
-| 1. Segmentation | BiRefNet (ONNX, primary) → RMBG-2.0 (ONNX, fallback) → BodyPix (always) | `lib/ai/services/onnxBackend.ts` |
-| 2. Mask Refinement | SAM2-style trimap + gradient-weighted boundary propagation | `lib/ai/processors/maskRefine.ts` |
-| 3. Alpha Matting | Guided filter dual-pass (PyMatting-equivalent, hair strand level) | `lib/ai/processors/guidedFilter.ts` |
-| 4. Halo Removal | Color decontamination + soft edge erosion | `lib/ai/processors/haloRemoval.ts` |
-| 5. Edge Polish | Feathering (1-3px) + sub-pixel anti-aliasing (OpenCV-equivalent) | `lib/ai/processors/edgeOps.ts` |
-| 6. Alpha Curve | S-curve sharpening (Pillow-equivalent contrast) | `lib/ai/processors/edgeOps.ts` |
-
-**ONNX Model Activation:** Drop `birefnet.onnx` or `rmbg2.onnx` into `artifacts/mobile/assets/models/` to activate ONNX inference. See `assets/models/README.md` for download links. The app always falls back to BodyPix + enhanced matting when no ONNX model is present.
-
-**AI Architecture prepared for native integration:**
-- BiRefNet / RMBG-2.0 — primary background removal (ONNX, web-ready)
-- U2Net / ISNet — additional segmentation upgrade path
-- GFPGAN / CodeFormer / RestoreFormer — face restore upgrade path
-- MediaPipe / RetinaFace — face detection upgrade path
-- Real-ESRGAN — super-resolution upgrade path
-
-## Restored Files
-
-When imported from zip, these files were missing and were reconstructed:
-
-- `package.json` files for all workspace packages
-- `artifacts/mobile/app.json` — Expo config
-- `artifacts/mobile/tsconfig.json` — TypeScript config
-- `artifacts/mobile/babel.config.js` — Babel config
-- `artifacts/mobile/app/_layout.tsx` — Root Expo Router layout
-- `artifacts/mobile/app/(tabs)/_layout.tsx` — Tab bar layout
-- `artifacts/mobile/context/ThemeContext.tsx` — Dark/light theme
-- `artifacts/mobile/context/DrawerContext.tsx` — Side drawer
-- `artifacts/mobile/hooks/useColors.ts` — Design tokens
-- `artifacts/mobile/components/StatCard.tsx`
-- `artifacts/mobile/components/QuickAccessCard.tsx`
-- `artifacts/mobile/components/ToolCard.tsx`
-- `artifacts/mobile/components/SectionTitle.tsx`
-- `lib/api-client-react/src/index.ts`
-- `lib/api-zod/src/index.ts`
-- `lib/db/src/index.ts`
-
-## User Preferences
-
-- Keep existing project structure — do not rename or move source files
-- Use pnpm as the package manager for all installs
+- Everything must work 100% offline (no API, no internet, no cloud)
+- Flutter migration must be possible in the future (keep architecture flat and service-oriented)
+- Material Design aesthetic, light + dark theme support
+- Premium cards, rounded corners, smooth animations

@@ -22,12 +22,12 @@ import { SectionTitle } from '@/components/SectionTitle';
 import { SearchModal } from '@/components/SearchModal';
 
 const QUICK_ACCESS = [
-  { id: 'bg-remove', name: 'Background Remove', icon: 'image-filter-none', color: '#10B981' },
-  { id: 'passport-photo', name: 'Passport Photo', icon: 'card-account-details', color: '#3B82F6' },
-  { id: 'pdf-tools', name: 'PDF Tools', icon: 'file-pdf-box', color: '#EF4444' },
-  { id: 'aadhaar-tools', name: 'Aadhaar Tools', icon: 'card-account-details-outline', color: '#F97316' },
-  { id: 'pan-tools', name: 'PAN Tools', icon: 'credit-card-outline', color: '#06B6D4' },
-  { id: 'qr-generator', name: 'QR Generator', icon: 'qrcode', color: '#8B5CF6' },
+  { id: 'bg-remove',       name: 'Background Remove', icon: 'image-filter-none',            color: '#10B981' },
+  { id: 'passport-photo',  name: 'Passport Photo',    icon: 'card-account-details',          color: '#3B82F6' },
+  { id: 'pdf-tools',       name: 'PDF Tools',         icon: 'file-pdf-box',                  color: '#EF4444' },
+  { id: 'print-passport-sheet', name: 'Passport Sheet', icon: 'passport',                  color: '#2563EB' },
+  { id: 'print-a4-layout', name: 'A4 Layout',         icon: 'file-document-outline',         color: '#7C3AED' },
+  { id: 'qr-generator',    name: 'QR Generator',      icon: 'qrcode',                        color: '#8B5CF6' },
 ];
 
 const MOST_USED = [

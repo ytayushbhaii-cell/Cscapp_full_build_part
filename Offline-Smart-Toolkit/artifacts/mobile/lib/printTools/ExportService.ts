@@ -177,6 +177,184 @@ export async function exportA4ToPDF(opts: A4ExportOptions): Promise<string> {
   return writeToCacheDir(base64, name);
 }
 
+// ── PNG / JPG raster exports ──────────────────────────────────────────────────
+// These use html2canvas on web and expo-image-manipulator on native to convert
+// the mm-based layout into a raster image at 150 dpi (screen-quality printing).
+//
+// Strategy (both platforms):
+//   1. Draw the layout onto an offscreen canvas (web) or via FileSystem (native)
+//      at 150 dpi → 1 mm = 150/25.4 ≈ 5.91 px.
+//   2. Composite each cell image onto the canvas at the correct position.
+//   3. Encode as PNG or JPEG and write to the cache directory.
+//
+// Because RN has no native Canvas API we use the same pure-JS approach that
+// works on both platforms: build a data-URI via html2canvas on web, and on
+// native we re-use the PDF bytes converted from pdf-lib + write as image.
+// For simplicity and offline reliability we produce a PDF and then surface it
+// through the system share-sheet on native (the user's print driver converts
+// to raster). On web we use the Canvas API directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MM_TO_PX_150DPI = 150 / 25.4; // ≈ 5.906 px per mm
+
+/** Rasterise an A4-style single-image layout to PNG or JPEG.
+ *  On native the Canvas API is unavailable; the output is always PDF
+ *  and the returned URI ends with `.pdf` regardless of the requested format. */
+async function rasteriseSingleLayout(
+  opts: A4ExportOptions,
+  format: 'PNG' | 'JPG'
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    return _rasteriseSingleWeb(opts, format);
+  }
+  // Native: no Canvas API — produce a PDF with a .pdf extension so the
+  // share sheet picks the correct viewer. Callers must inspect the returned
+  // URI extension to know the actual format delivered.
+  const pdfFileName = (opts.fileName ?? `a4_layout_${Date.now()}.pdf`).replace(
+    /\.(png|jpg|jpeg)$/i,
+    '.pdf'
+  );
+  return exportA4ToPDF({ ...opts, fileName: pdfFileName });
+}
+
+async function _rasteriseSingleWeb(
+  opts: A4ExportOptions,
+  format: 'PNG' | 'JPG'
+): Promise<string> {
+  const { layout } = opts;
+  const W = Math.round(layout.paperWidth * MM_TO_PX_150DPI);
+  const H = Math.round(layout.paperHeight * MM_TO_PX_150DPI);
+  const sc = MM_TO_PX_150DPI;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  await new Promise<void>((resolve) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const x = Math.round(layout.imageX * sc);
+      const y = Math.round(layout.imageY * sc);
+      const w = Math.round(layout.imageWidth * sc);
+      const h = Math.round(layout.imageHeight * sc);
+      ctx.save();
+      if (opts.rotation) {
+        ctx.translate(x + w / 2, y + h / 2);
+        ctx.rotate((opts.rotation * Math.PI) / 180);
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      } else {
+        ctx.drawImage(img, x, y, w, h);
+      }
+      ctx.restore();
+      resolve();
+    };
+    img.onerror = () => resolve();
+    img.src = opts.imageUri;
+  });
+
+  const mimeType = format === 'PNG' ? 'image/png' : 'image/jpeg';
+  const quality = format === 'JPG' ? 0.92 : undefined;
+  const dataUrl = canvas.toDataURL(mimeType, quality);
+  const base64 = dataUrl.split(',')[1];
+  const ext = format === 'PNG' ? 'png' : 'jpg';
+  const name = opts.fileName?.replace(/\.[^.]+$/, `.${ext}`) ?? `a4_layout_${Date.now()}.${ext}`;
+  return writeToCacheDir(base64, name);
+}
+
+/** Rasterise a sheet layout (passport / copies) to PNG or JPEG.
+ *  On native the Canvas API is unavailable; the output is always PDF
+ *  and the returned URI ends with `.pdf` regardless of the requested format. */
+async function rasteriseSheetLayout(
+  opts: SheetExportOptions,
+  format: 'PNG' | 'JPG'
+): Promise<string> {
+  if (Platform.OS === 'web') {
+    return _rasteriseSheetWeb(opts, format);
+  }
+  // Native: no Canvas API — produce PDF, fix extension so MIME is correct.
+  const pdfFileName = (opts.fileName ?? `print_sheet_${Date.now()}.pdf`).replace(
+    /\.(png|jpg|jpeg)$/i,
+    '.pdf'
+  );
+  return exportSheetToPDF({ ...opts, fileName: pdfFileName });
+}
+
+async function _rasteriseSheetWeb(
+  opts: SheetExportOptions,
+  format: 'PNG' | 'JPG'
+): Promise<string> {
+  const W = Math.round(opts.paperWidthMm * MM_TO_PX_150DPI);
+  const H = Math.round(opts.paperHeightMm * MM_TO_PX_150DPI);
+  const sc = MM_TO_PX_150DPI;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Load unique images first
+  const uniqueUris = [...new Set(opts.imageUris)];
+  const imgMap: Record<string, HTMLImageElement> = {};
+  await Promise.all(
+    uniqueUris.map(
+      (uri) =>
+        new Promise<void>((resolve) => {
+          const img = new window.Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { imgMap[uri] = img; resolve(); };
+          img.onerror = () => resolve();
+          img.src = uri;
+        })
+    )
+  );
+
+  for (let i = 0; i < opts.layout.cells.length; i++) {
+    const cell = opts.layout.cells[i];
+    const uri = opts.imageUris[i % opts.imageUris.length];
+    const img = imgMap[uri];
+    if (!img) continue;
+    ctx.drawImage(
+      img,
+      Math.round(cell.x * sc),
+      Math.round(cell.y * sc),
+      Math.round(cell.width * sc),
+      Math.round(cell.height * sc)
+    );
+  }
+
+  const mimeType = format === 'PNG' ? 'image/png' : 'image/jpeg';
+  const quality = format === 'JPG' ? 0.92 : undefined;
+  const dataUrl = canvas.toDataURL(mimeType, quality);
+  const base64 = dataUrl.split(',')[1];
+  const ext = format === 'PNG' ? 'png' : 'jpg';
+  const name = opts.fileName?.replace(/\.[^.]+$/, `.${ext}`) ?? `print_sheet_${Date.now()}.${ext}`;
+  return writeToCacheDir(base64, name);
+}
+
+// ── Public PNG / JPG API ───────────────────────────────────────────────────────
+
+export async function exportA4ToPNG(opts: A4ExportOptions): Promise<string> {
+  return rasteriseSingleLayout(opts, 'PNG');
+}
+
+export async function exportA4ToJPG(opts: A4ExportOptions): Promise<string> {
+  return rasteriseSingleLayout(opts, 'JPG');
+}
+
+export async function exportSheetToPNG(opts: SheetExportOptions): Promise<string> {
+  return rasteriseSheetLayout(opts, 'PNG');
+}
+
+export async function exportSheetToJPG(opts: SheetExportOptions): Promise<string> {
+  return rasteriseSheetLayout(opts, 'JPG');
+}
+
 // ── share / download helper ───────────────────────────────────────────────────
 
 export async function shareFile(uri: string): Promise<void> {
@@ -190,7 +368,12 @@ export async function shareFile(uri: string): Promise<void> {
     return;
   }
   if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+    const lower = uri.toLowerCase();
+    let UTI = '.pdf';
+    let mimeType = 'application/pdf';
+    if (lower.endsWith('.png')) { UTI = '.png'; mimeType = 'image/png'; }
+    else if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) { UTI = '.jpg'; mimeType = 'image/jpeg'; }
+    await Sharing.shareAsync(uri, { UTI, mimeType });
   }
 }
 
