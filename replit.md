@@ -71,8 +71,24 @@ All tools are 100% offline — no API, no internet, no Firebase.
 | 20 | Batch Rename | `/photo-tools/batch-rename` | ✅ Full (ZIP export) |
 | +4 | White/Blue/Red BG, Transparent PNG | various | ✅ Quick-access presets |
 
+## Background Remover Pipeline (Upgraded)
+
+The background removal engine now runs a professional 6-stage pipeline (comparable to Remove.bg / Adobe Express):
+
+| Stage | Algorithm | File |
+|-------|-----------|------|
+| 1. Segmentation | BiRefNet (ONNX, primary) → RMBG-2.0 (ONNX, fallback) → BodyPix (always) | `lib/ai/services/onnxBackend.ts` |
+| 2. Mask Refinement | SAM2-style trimap + gradient-weighted boundary propagation | `lib/ai/processors/maskRefine.ts` |
+| 3. Alpha Matting | Guided filter dual-pass (PyMatting-equivalent, hair strand level) | `lib/ai/processors/guidedFilter.ts` |
+| 4. Halo Removal | Color decontamination + soft edge erosion | `lib/ai/processors/haloRemoval.ts` |
+| 5. Edge Polish | Feathering (1-3px) + sub-pixel anti-aliasing (OpenCV-equivalent) | `lib/ai/processors/edgeOps.ts` |
+| 6. Alpha Curve | S-curve sharpening (Pillow-equivalent contrast) | `lib/ai/processors/edgeOps.ts` |
+
+**ONNX Model Activation:** Drop `birefnet.onnx` or `rmbg2.onnx` into `artifacts/mobile/assets/models/` to activate ONNX inference. See `assets/models/README.md` for download links. The app always falls back to BodyPix + enhanced matting when no ONNX model is present.
+
 **AI Architecture prepared for native integration:**
-- U2Net / BiRefNet / ISNet — background removal upgrade path
+- BiRefNet / RMBG-2.0 — primary background removal (ONNX, web-ready)
+- U2Net / ISNet — additional segmentation upgrade path
 - GFPGAN / CodeFormer / RestoreFormer — face restore upgrade path
 - MediaPipe / RetinaFace — face detection upgrade path
 - Real-ESRGAN — super-resolution upgrade path

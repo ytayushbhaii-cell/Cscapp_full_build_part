@@ -12,4 +12,14 @@ const config = getDefaultConfig(__dirname);
 // "main" to take priority everywhere.
 config.resolver.resolverMainFields = ['react-native', 'main', 'browser', 'module'];
 
+// Register ONNX model files and WebAssembly binaries as static assets so
+// Metro can serve them. Place BiRefNet / RMBG-2.0 .onnx files under
+// assets/models/ to activate ONNX inference; the app falls back to BodyPix
+// automatically when the files are absent.
+config.resolver.assetExts = [
+  ...(config.resolver.assetExts || []),
+  'onnx',  // ONNX model weights (BiRefNet, RMBG-2.0)
+  'wasm',  // onnxruntime-web WebAssembly binaries
+];
+
 module.exports = config;

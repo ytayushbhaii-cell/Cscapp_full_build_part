@@ -19,10 +19,14 @@ class AIModelRegistry {
 
   private registerDefaults() {
     // Segmentation models (background removal, blur, etc.)
-    this.register({ id: 'bodypix',    name: 'BodyPix MobileNetV1',  backend: 'bodypix',   status: 'offline-cpu', maxRes: 0,    sizeMB: 4  });
+    this.register({ id: 'bodypix',    name: 'BodyPix MobileNetV1',  backend: 'bodypix',   status: 'offline-cpu',    maxRes: 0,    sizeMB: 4   });
     this.register({ id: 'u2net',      name: 'U2Net',                backend: 'u2net',     status: 'ai-unavailable', maxRes: 320,  sizeMB: 176 });
     this.register({ id: 'u2net-lite', name: 'U2Net-Lite',           backend: 'u2net',     status: 'ai-unavailable', maxRes: 320,  sizeMB: 4.7 });
+    // Primary ONNX segmentation models (place .onnx file in assets/models/ to activate)
     this.register({ id: 'birefnet',   name: 'BiRefNet',             backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 374 });
+    this.register({ id: 'birefnet-q', name: 'BiRefNet (INT8)',       backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 93  });
+    this.register({ id: 'rmbg2',      name: 'RMBG-2.0',             backend: 'rmbg2',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 176 });
+    this.register({ id: 'rmbg2-q',    name: 'RMBG-2.0 (INT8)',      backend: 'rmbg2',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
     this.register({ id: 'isnet',      name: 'IS-Net',               backend: 'isnet',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 178 });
 
     // Face detection / alignment
@@ -56,7 +60,7 @@ class AIModelRegistry {
 
   /** Best available segmentation backend (prefers AI model over CPU) */
   bestSegmentationBackend(): SegmentationBackend {
-    for (const id of ['birefnet', 'isnet', 'u2net-lite', 'u2net']) {
+    for (const id of ['birefnet', 'birefnet-q', 'rmbg2', 'rmbg2-q', 'isnet', 'u2net-lite', 'u2net']) {
       const m = this.models.get(id);
       if (m && m.status === 'ai-cached') return m.backend as SegmentationBackend;
     }
@@ -85,7 +89,8 @@ class AIModelRegistry {
     const labels: Record<SegmentationBackend, string> = {
       'bodypix':  'BodyPix · CPU',
       'u2net':    'U2Net',
-      'birefnet': 'BiRefNet',
+      'birefnet': 'BiRefNet · ONNX',
+      'rmbg2':    'RMBG-2.0 · ONNX',
       'isnet':    'IS-Net',
     };
     return labels[backend] ?? backend;

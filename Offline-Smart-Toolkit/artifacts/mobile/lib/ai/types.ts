@@ -12,7 +12,7 @@ export type ModelStatus =
   | 'ai-loading'         // dedicated AI model being loaded from disk
   | 'ai-unavailable';    // model file not found / not yet bundled
 
-export type SegmentationBackend = 'bodypix' | 'u2net' | 'birefnet' | 'isnet';
+export type SegmentationBackend = 'bodypix' | 'u2net' | 'birefnet' | 'rmbg2' | 'isnet';
 export type FaceBackend        = 'bodypix-centroid' | 'mediapipe' | 'retinaface';
 export type EnhancementBackend = 'cpu-sharpen' | 'real-esrgan' | 'gfpgan' | 'codeformer';
 
