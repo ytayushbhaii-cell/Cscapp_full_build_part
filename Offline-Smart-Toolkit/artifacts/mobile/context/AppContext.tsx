@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PHOTO_TOOLS } from '@/lib/photoTools/tools';
 import { ALL_DOC_TOOLS } from '@/lib/features/documents/tools';
+import { ALL_QR_TOOLS } from '@/lib/features/qr/tools';
+import { ALL_SIG_TOOLS } from '@/lib/features/signature/tools';
 
 export interface RecentFile {
   id: string;
@@ -82,12 +84,31 @@ const DOC_TOOL_ENTRIES: Tool[] = ALL_DOC_TOOLS.map((t) => ({
   route: t.route,
 }));
 
+const QR_TOOL_ENTRIES: Tool[] = ALL_QR_TOOLS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: t.id.startsWith('barcode') ? 'QR & Barcode' : 'QR & Barcode',
+  iconName: t.iconName,
+  color: t.color,
+  description: t.description,
+  route: t.route,
+}));
+
+const SIG_TOOL_ENTRIES: Tool[] = ALL_SIG_TOOLS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: t.id.startsWith('stamp') ? 'Stamp Tools' : 'Signature Tools',
+  iconName: t.iconName,
+  color: t.color,
+  description: t.description,
+  route: t.route,
+}));
+
 export const ALL_TOOLS: Tool[] = [
   ...PHOTO_TOOL_ENTRIES,
   ...DOC_TOOL_ENTRIES,
-  { id: 'qr-generator', name: 'QR Generator', category: 'QR & Barcode', iconName: 'qrcode', color: '#8B5CF6', description: 'Generate QR codes for any data' },
-  { id: 'barcode-gen', name: 'Barcode Generator', category: 'QR & Barcode', iconName: 'barcode', color: '#7C3AED', description: 'Generate barcodes for products' },
-  { id: 'signature', name: 'Signature Tool', category: 'Signature Tools', iconName: 'draw', color: '#EC4899', description: 'Create and manage digital signatures' },
+  ...QR_TOOL_ENTRIES,
+  ...SIG_TOOL_ENTRIES,
 ];
 
 export const ALL_CATEGORIES: ToolCategory[] = [
@@ -98,8 +119,8 @@ export const ALL_CATEGORIES: ToolCategory[] = [
   { id: 'driving',  name: 'Driving License',        iconName: 'car-outline',                   color: '#10B981', gradient: ['#10B981', '#059669'], count: 4  },
   { id: 'passport', name: 'Passport Tools',         iconName: 'passport',                      color: '#3B82F6', gradient: ['#3B82F6', '#2563EB'], count: 4  },
   { id: 'pdf',      name: 'PDF Tools',              iconName: 'file-pdf-box',                  color: '#EF4444', gradient: ['#EF4444', '#DC2626'], count: 15 },
-  { id: 'qr',       name: 'QR & Barcode',           iconName: 'qrcode-scan',                   color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: 4  },
-  { id: 'signature',name: 'Signature Tools',        iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: 2  },
+  { id: 'qr',       name: 'QR & Barcode',           iconName: 'qrcode-scan',                   color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: ALL_QR_TOOLS.length },
+  { id: 'signature',name: 'Signature & Stamp',      iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: ALL_SIG_TOOLS.length },
   { id: 'utilities',name: 'Utilities',              iconName: 'tools',                         color: '#64748B', gradient: ['#64748B', '#475569'], count: 7  },
 ];
 
@@ -110,7 +131,7 @@ const AppContext = createContext<AppContextType>({
   isFavorite: () => false,
   tools: ALL_TOOLS,
   categories: ALL_CATEGORIES,
-  stats: { totalTools: 46, recentFilesCount: DUMMY_RECENT.length, favoritesCount: 0, storageUsed: '12.4 MB' },
+  stats: { totalTools: ALL_TOOLS.length, recentFilesCount: DUMMY_RECENT.length, favoritesCount: 0, storageUsed: '12.4 MB' },
 });
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -133,7 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isFavorite = (toolId: string) => favoriteIds.includes(toolId);
 
   const stats = {
-    totalTools: 46,
+    totalTools: ALL_TOOLS.length,
     recentFilesCount: DUMMY_RECENT.length,
     favoritesCount: favoriteIds.length,
     storageUsed: '12.4 MB',
