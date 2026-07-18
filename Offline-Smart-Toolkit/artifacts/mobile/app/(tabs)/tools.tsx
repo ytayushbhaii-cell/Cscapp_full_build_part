@@ -29,6 +29,10 @@ const CATEGORY_ROUTES: Record<string, string> = {
   driving:    '/document-tools',
   'id-card':  '/id-card-tools',
   print:      '/print-tools',
+  qr:         '/qr-tools',
+  barcode:    '/qr-tools',
+  signature:  '/signature-tools',
+  stamp:      '/signature-tools',
 };
 
 export default function ToolsScreen() {
