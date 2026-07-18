@@ -62,6 +62,21 @@ Offline-Smart-Toolkit/
 - `.web.ts` extensions used for browser-incompatible native modules
 - `resolverMainFields: ['react-native', 'main', 'browser', 'module']`
 
+## BiRefNet Background Removal Pipeline
+The background remover uses BiRefNet ONNX (`public/models/birefnet-q.onnx`) with a full professional post-processing pipeline:
+
+1. **Decode** — Canvas API for zero-quality-loss RGBA (supports JPG, PNG, JPEG, WebP)
+2. **Resize** — Bilinear resize to 1024×1024 for model input
+3. **Inference** — BiRefNet ONNX with ImageNet normalization (mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225]); smart sigmoid detection handles logit outputs
+4. **Upsample** — Bilinear upsample of alpha mask back to original resolution
+5. **SAM2 refinement** — Trimap generation (erosion 1.5%, dilation 2.5%) + gradient-weighted boundary propagation (4 iterations)
+6. **Quad-pass guided filter** — r=20→8→3→1 for global structure + hair strand detail
+7. **Edge polish** — Adaptive feathering (≥3px) + sub-pixel anti-aliasing + S-curve (1.1)
+8. **Halo removal** — Color decontamination (searchR=20, strength=0.92) + soft alpha erosion
+9. **Composite** — Transparent PNG output at original resolution
+
+Key files: `lib/ai/services/onnxBackend.ts`, `lib/ai/services/SegmentationService.ts`, `lib/ai/processors/`
+
 ## Key Packages (mobile)
 - `pdf-lib` — PDF creation/manipulation (CJS build forced via metro config)
 - `tesseract.js` — OCR (web only, dynamically imported)

@@ -91,8 +91,11 @@ export function generateTrimap(
   dilR?: number,
 ): Trimap {
   const shortSide = Math.min(w, h);
-  const eR = erosR ?? Math.max(3, Math.round(shortSide * 0.01));
-  const dR = dilR  ?? Math.max(5, Math.round(shortSide * 0.015));
+  // Wider margins vs v1 (1% → 1.5% erosion, 1.5% → 2.5% dilation):
+  // captures finer clothing/hair boundaries that were previously classified
+  // as definite foreground/background and skipped during refinement.
+  const eR = erosR ?? Math.max(4, Math.round(shortSide * 0.015));
+  const dR = dilR  ?? Math.max(8, Math.round(shortSide * 0.025));
 
   // For performance on large images, work with binarized mask
   const binary = new Float32Array(alpha.length);
@@ -223,5 +226,6 @@ export function sam2StyleRefinement(
   h: number,
 ): Float32Array {
   const trimap = generateTrimap(alpha, w, h);
-  return refineMaskBoundary(alpha, trimap, pixels, w, h, 3);
+  // 4 iterations (was 3): extra pass improves hair/clothing boundary convergence
+  return refineMaskBoundary(alpha, trimap, pixels, w, h, 4);
 }

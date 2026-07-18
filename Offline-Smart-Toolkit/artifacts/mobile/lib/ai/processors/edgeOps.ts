@@ -178,9 +178,11 @@ export function antiAliasAlpha(alpha: Float32Array, w: number, h: number): Float
  * smoothly transitions the edge zone. Equivalent to Pillow contrast adjustment.
  *
  * @param alpha    - alpha map (Float32Array, 0-1), length = w*h
- * @param sharpness - 0=linear, 1=standard smoothstep, 2+=high contrast (default 1.2)
+ * @param sharpness - 0=linear, 1=standard smoothstep, 2+=high contrast (default 1.1)
+ *                    BiRefNet outputs near-binary logits so 1.1 (was 1.2)
+ *                    avoids over-sharpening fine hair strands.
  */
-export function sharpensAlphaCurve(alpha: Float32Array, sharpness = 1.2): Float32Array {
+export function sharpensAlphaCurve(alpha: Float32Array, sharpness = 1.1): Float32Array {
   const out = new Float32Array(alpha.length);
   for (let i = 0; i < alpha.length; i++) {
     const t = alpha[i];

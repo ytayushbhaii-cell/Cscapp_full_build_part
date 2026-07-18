@@ -53,10 +53,12 @@ const BIREFNET_CONFIG: ModelConfig = {
   publicPath: '/models/birefnet-q.onnx',
   urlEnvVar: 'EXPO_PUBLIC_BIREFNET_MODEL_URL',
   inputSize: 1024,
-  // RMBG-1.4 / RMBG-2.0 normalization: (pixel/255 - 0.5) / 1.0 → range [-0.5, 0.5]
-  mean: [0.5, 0.5, 0.5],
-  std:  [1.0, 1.0, 1.0],
-  outputIsProbability: true, // RMBG-1.4 ONNX includes sigmoid in graph
+  // BiRefNet normalization: ImageNet mean/std — (pixel/255 - mean) / std
+  // This is the standard normalization for BiRefNet (zhengpeng7/BiRefNet).
+  // Range after norm: approx [-2.1, 2.6] (not bounded like RMBG's [-0.5, 0.5])
+  mean: [0.485, 0.456, 0.406],
+  std:  [0.229, 0.224, 0.225],
+  outputIsProbability: false, // BiRefNet outputs raw logits; sigmoid applied below
 };
 
 // ─── URL helpers ──────────────────────────────────────────────────────────────

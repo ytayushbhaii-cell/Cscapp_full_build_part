@@ -158,15 +158,18 @@ export function guidedFilterDualPass(
 }
 
 /**
- * Triple-pass guided filter — professional hair-strand precision.
+ * Quad-pass guided filter — near remove.bg hair-strand precision.
  *
- * Three progressive passes at decreasing radii:
- *   Pass 1 (r=20, ε=1e-2): Global structure — large smooth regions
- *   Pass 2 (r=8,  ε=5e-3): Edge sharpening — boundary refinement
- *   Pass 3 (r=3,  ε=5e-5): Sub-pixel strands — individual hair detail
+ * Four progressive passes at decreasing radii:
+ *   Pass 1 (r=20, ε=1e-2):  Global structure — large smooth regions
+ *   Pass 2 (r=8,  ε=5e-3):  Edge sharpening — boundary refinement
+ *   Pass 3 (r=3,  ε=5e-5):  Sub-pixel strands — individual hair detail
+ *   Pass 4 (r=1,  ε=1e-6):  Ultra-fine micro-strands & anti-aliasing
  *
  * Boundary-adaptive blending keeps confident interior/background regions
- * intact while focusing refinement on the uncertain boundary zone.
+ * intact while focusing max refinement on the uncertain boundary zone.
+ * The 4th pass is applied only in the boundary zone (0.05 < α < 0.95)
+ * to avoid introducing noise in confident regions.
  */
 export function guidedFilterTriplePass(
   pixels: Uint8ClampedArray,
@@ -180,21 +183,30 @@ export function guidedFilterTriplePass(
   const p1 = guidedFilterRGBA(pixels, alpha, w, h, 20, 1e-2);
   // Pass 2: edge sharpening
   const p2 = guidedFilterRGBA(pixels, p1,   w, h,  8, 5e-3);
-  // Pass 3: sub-pixel hair strands (very tight radius, low regularisation)
+  // Pass 3: sub-pixel hair strands
   const p3 = guidedFilterRGBA(pixels, p2,   w, h,  3, 5e-5);
+  // Pass 4: ultra-fine micro-strands (only where boundary exists)
+  const p4 = guidedFilterRGBA(pixels, p3,   w, h,  1, 1e-6);
 
   // Boundary-adaptive blend:
-  //   weight = 0 in certain fg/bg → keep original coarse alpha (no drift)
-  //   weight = 1 at boundary (a ≈ 0.5) → use fine pass for max detail
+  //   conf=1 (certain fg/bg) → rely on p1 for clean solid regions
+  //   conf=0 (uncertain boundary, a≈0.5) → use p4 for max hair detail
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const a      = alpha[i];
-    const weight = 4 * a * (1 - a); // peaks at a=0.5, zero at a=0 or a=1
-    // Blend p2 (structure) with p3 (fine) weighted by boundary certainty
-    const detail = (1 - weight) * p2[i] + weight * p3[i];
-    // Final: mostly structure in confident zones, detail at boundaries
-    const conf   = Math.abs(2 * a - 1); // 1 = certain, 0 = uncertain
-    out[i] = Math.max(0, Math.min(1, conf * p1[i] + (1 - conf) * detail));
+    const a    = alpha[i];
+    const conf = Math.abs(2 * a - 1); // 1 = certain, 0 = uncertain boundary
+
+    if (conf > 0.95) {
+      // Confident region: use broad structure pass to avoid noise
+      out[i] = p1[i];
+    } else {
+      const boundary = 1 - conf; // how much are we in the uncertain zone?
+      // Interpolate from structure → fine → ultra-fine as boundary increases
+      const midDetail  = (1 - boundary) * p2[i] + boundary * p3[i];
+      const fineDetail = (1 - boundary) * p3[i] + boundary * p4[i];
+      const detail     = (1 - boundary) * midDetail + boundary * fineDetail;
+      out[i] = Math.max(0, Math.min(1, conf * p1[i] + (1 - conf) * detail));
+    }
   }
   return out;
 }

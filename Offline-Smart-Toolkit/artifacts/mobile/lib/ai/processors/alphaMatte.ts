@@ -150,17 +150,18 @@ export function refineAlpha(
   let alpha = coarseAlpha;
 
   // Stage 2: SAM2-style boundary refinement with wider trimap margins
-  // Wider dilation captures finer boundary detail (e.g., flyaway hairs)
+  // Wider dilation (2.5% of short side) captures fine hair/clothing edges
   alpha = sam2StyleRefinement(alpha, pixels, w, h);
 
-  // Stage 3: Triple-pass guided filter — sub-pixel precision
+  // Stage 3: Quad-pass guided filter — sub-pixel + micro-strand precision
   if (w >= 64 && h >= 64) {
     alpha = guidedFilterTriplePass(pixels, alpha, w, h);
   }
 
-  // Stage 4: Edge polish (2px feathering + anti-aliasing + S-curve)
-  // Slightly more feathering than v1 for smoother photographic edges
-  alpha = applyEdgePostProcessing(alpha, w, h, 2);
+  // Stage 4: Edge polish — adaptive feather radius (3px min) + anti-aliasing + S-curve
+  // Larger feather radius gives smoother photographic edges on high-res images
+  const fPx = Math.max(3, featherRadius(w, h));
+  alpha = applyEdgePostProcessing(alpha, w, h, fPx);
 
   return alpha;
 }
@@ -213,8 +214,10 @@ export function compositeWithSoftAlpha(
   out.set(pixels);
 
   if (bgColor === null) {
-    // Transparent output: decontaminate edge colors, then embed alpha
-    removeWhiteHalo(pixels, out, alpha, width, height, 16, 0.9);
+    // Transparent output: decontaminate edge colors, then embed alpha.
+    // Larger search radius (20) + higher strength (0.92) vs v1 (16, 0.9)
+    // for better removal of background color spill on hair/clothing edges.
+    removeWhiteHalo(pixels, out, alpha, width, height, 20, 0.92);
     const erodedAlpha = erodeAlphaEdge(alpha, width, height, 1);
     for (let i = 0; i < n; i++) {
       out[i * 4 + 3] = Math.round(erodedAlpha[i] * 255);
