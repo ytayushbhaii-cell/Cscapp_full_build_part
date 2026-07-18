@@ -26,6 +26,7 @@
  */
 
 import { Platform } from 'react-native';
+import { loadOnnxRuntime } from './ortLoader';
 
 // ─── Model config ─────────────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ function getWasmDir(): string {
 
 // ─── Session cache ────────────────────────────────────────────────────────────
 
-type OnnxSession = import('onnxruntime-web').InferenceSession;
+type OnnxSession = any; // Typed loosely — ORT is loaded at runtime via script tag
 let sessionPromise: Promise<OnnxSession | null> | null = null;
 
 // ─── Session loader ───────────────────────────────────────────────────────────
@@ -102,16 +103,21 @@ async function loadSession(): Promise<OnnxSession | null> {
   const modelUrl = getModelUrl();
 
   try {
-    const ort = await import('onnxruntime-web');
+    // Load ORT via <script> tag (ortLoader.web.ts) — Metro never bundles ORT
+    // because every ORT JS file contains import(webpackIgnore) which Metro rejects.
+    const ort = await loadOnnxRuntime();
+    if (!ort) {
+      console.warn('[BiRefNet] ORT unavailable on this platform');
+      return null;
+    }
 
-    // Configure WASM path — bundled in public/ort-wasm/
+    // Configure WASM path — files served from public/ort-wasm/
     ort.env.wasm.wasmPaths = getWasmDir();
 
-    // Use as many threads as the device has (capped at 4 for stability)
-    ort.env.wasm.numThreads =
-      typeof navigator !== 'undefined'
-        ? Math.min(navigator.hardwareConcurrency ?? 2, 4)
-        : 2;
+    // Single-threaded to avoid SharedArrayBuffer requirement
+    // (COOP/COEP headers not set on Replit dev server).
+    // Set to 1 so ORT picks ort-wasm-simd-threaded.wasm in single-worker mode.
+    ort.env.wasm.numThreads = 1;
 
     const session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ['wasm'],
@@ -263,10 +269,11 @@ export async function runBiRefNet(
 
     const tensorData = toNCHWTensor(resized, sz, sz, cfg.mean, cfg.std);
 
-    const ort         = await import('onnxruntime-web');
+    const ort         = await loadOnnxRuntime();
+    if (!ort) return null;
     const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, sz, sz]);
     const inputName   = session.inputNames[0] ?? 'input';
-    const feeds: Record<string, import('onnxruntime-web').Tensor> = { [inputName]: inputTensor };
+    const feeds: Record<string, any> = { [inputName]: inputTensor };
 
     const results    = await session.run(feeds);
     const outputName = session.outputNames[0] ?? 'output';

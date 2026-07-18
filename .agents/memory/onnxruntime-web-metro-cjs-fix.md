@@ -1,23 +1,23 @@
 ---
-name: onnxruntime-web Metro CJS fix
-description: Metro rejects onnxruntime-web ESM bundle due to webpack-ignore dynamic imports; fix via resolveRequest override to CJS build.
+name: onnxruntime-web Metro script-tag fix
+description: EVERY onnxruntime-web JS file (CJS and ESM) has import(webpackIgnore) for WASM; the only fix is to never import it via Metro — load via script tag instead.
 ---
 
-# onnxruntime-web Metro CJS Fix
+# onnxruntime-web — Never Import via Metro
 
 ## The Rule
-In metro.config.js, always redirect `onnxruntime-web` to `dist/ort.min.js` (CJS build) via `resolveRequest`.
+Do NOT `import('onnxruntime-web')` anywhere Metro will bundle. Instead:
+1. Copy `dist/ort.min.js` to `public/ort.min.js` (UMD, sets `window.ort`).
+2. Create `ortLoader.web.ts` — injects a `<script src="/ort.min.js">` and returns `window.ort`.
+3. Create `ortLoader.native.ts` — returns `null` (native uses a different path).
+4. Import `loadOnnxRuntime` from `./ortLoader` (Metro picks `.web.ts` on web, `.native.ts` on native).
 
-**Why:** onnxruntime-web's default ESM entry (`ort.bundle.min.mjs`) contains `import(/*webpackIgnore:true*/ /*@vite-ignore*/t)` dynamic imports on line 11. Metro's transformer rejects these with "Invalid call at line N: import(...)". The CJS build (`dist/ort.min.js`) avoids this — it uses fetch() to load WASM at runtime, which is fine.
+**Why:** ALL onnxruntime-web JS files — `ort.bundle.min.mjs`, `ort.min.mjs`, `ort.min.js`, everything — contain `import(/*webpackIgnore:true*/ /*@vite-ignore*/e)` dynamic calls on line 6 or 11. Metro's transformer rejects these regardless of which file you redirect to. The only escape is to never let Metro see ORT source at all.
 
-**How to apply:** In `metro.config.js` `resolveRequest` callback:
-```js
-if (moduleName === 'onnxruntime-web') {
-  return { filePath: ortCjsEntry, type: 'sourceFile' };
-}
-```
-Where `ortCjsEntry` resolves to the package's `dist/ort.min.js`.
+**How to apply:**
+- `ortLoader.web.ts`: inject `<script>` tag pointing to `/ort.min.js`, resolve on `window.ort`.
+- `onnxBackend.ts`: replace `await import('onnxruntime-web')` with `await loadOnnxRuntime()`.
+- `metro.config.js`: no `resolveRequest` override needed for ORT.
+- Set `ort.env.wasm.numThreads = 1` to avoid SharedArrayBuffer/COOP header requirement.
 
-The WASM files are still loaded at runtime via `ort.env.wasm.wasmPaths` — this is unaffected by the resolver redirect. Make sure WASM files remain in `public/ort-wasm/`.
-
-**Symptom:** `Web Bundling failed ... ort.bundle.min.mjs: Invalid call at line 11: import(/*webpackIgnore:true*/ ...)`
+**Symptom:** `Web Bundling failed ... ort.*.mjs: Invalid call at line N: import(/*webpackIgnore:true*/ ...)`

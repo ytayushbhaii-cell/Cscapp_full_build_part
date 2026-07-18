@@ -22,25 +22,15 @@ const pdfLibCjsEntry = path.resolve(
   '../../node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib/cjs/index.js'
 );
 
-// onnxruntime-web ships an ESM bundle (ort.bundle.min.mjs) that Metro picks
-// up via the "module" field. That bundle uses `import(/*webpackIgnore*/ t)`
-// dynamic imports which Metro's transformer rejects with "Invalid call".
-// Redirecting to the plain CJS build avoids the dynamic-import problem;
-// the WASM files are still fetched at runtime from public/ort-wasm/ via
-// the `ort.env.wasm.wasmPaths` setting in onnxBackend.ts.
-const ortCjsEntry = path.resolve(
-  __dirname,
-  '../../node_modules/.pnpm/onnxruntime-web@1.27.0/node_modules/onnxruntime-web/dist/ort.min.js'
-);
-
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'pdf-lib') {
     return { filePath: pdfLibCjsEntry, type: 'sourceFile' };
   }
-  if (moduleName === 'onnxruntime-web') {
-    return { filePath: ortCjsEntry, type: 'sourceFile' };
-  }
-  // Fall through to the default resolver for everything else
+  // onnxruntime-web is intentionally NOT imported via Metro.
+  // All ORT JS files contain `import(/*webpackIgnore*/)` dynamic imports
+  // that Metro's transformer rejects. Instead, ortLoader.web.ts loads
+  // ort.min.js via a <script> tag at runtime (public/ort.min.js).
+  // Metro never sees any ORT source, so this resolver override is not needed.
   return context.resolveRequest(context, moduleName, platform);
 };
 
