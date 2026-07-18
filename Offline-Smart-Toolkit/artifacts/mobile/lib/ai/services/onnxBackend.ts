@@ -94,6 +94,8 @@ function getWasmDir(): string {
 
 type OnnxSession = any; // Typed loosely — ORT is loaded at runtime via script tag
 let sessionPromise: Promise<OnnxSession | null> | null = null;
+/** Stores the last ORT load error so callers can surface a useful message. */
+export let lastOrtError: string | null = null;
 
 // ─── Session loader ───────────────────────────────────────────────────────────
 
@@ -111,13 +113,15 @@ async function loadSession(): Promise<OnnxSession | null> {
       return null;
     }
 
-    // Configure WASM path — files served from public/ort-wasm/
+    // Configure WASM path — both threaded and asyncify WASMs are in public/ort-wasm/.
+    // ORT auto-selects:
+    //   - ort-wasm-simd-threaded.wasm         if SharedArrayBuffer available
+    //   - ort-wasm-simd-threaded.asyncify.wasm if not (Replit dev, no COOP/COEP headers)
     ort.env.wasm.wasmPaths = getWasmDir();
 
-    // Single-threaded to avoid SharedArrayBuffer requirement
-    // (COOP/COEP headers not set on Replit dev server).
-    // Set to 1 so ORT picks ort-wasm-simd-threaded.wasm in single-worker mode.
-    ort.env.wasm.numThreads = 1;
+    // Do NOT force numThreads — let ORT auto-detect based on SharedArrayBuffer
+    // availability. Forcing 1 causes ORT to look for a non-existent non-threaded
+    // WASM file; the auto-detect path correctly uses asyncify when threads aren't available.
 
     const session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ['wasm'],
@@ -127,16 +131,10 @@ async function loadSession(): Promise<OnnxSession | null> {
     console.info(`[BiRefNet] ✓ Model loaded from ${modelUrl}`);
     return session;
   } catch (err: any) {
-    // Distinguish "model file not found" from WASM/ORT errors for clearer messages
     const msg: string = err?.message ?? String(err);
-    if (msg.includes('404') || msg.includes('not found') || msg.includes('fetch')) {
-      console.warn(
-        '[BiRefNet] Model file not found at', modelUrl,
-        '— place birefnet-q.onnx in public/models/ or set EXPO_PUBLIC_BIREFNET_MODEL_URL',
-      );
-    } else {
-      console.warn('[BiRefNet] Failed to load model:', err);
-    }
+    lastOrtError = msg;
+    // Surface the real error — "BiRefNet model not loaded" is too vague
+    console.error('[BiRefNet] Load failed:', msg, err);
     return null;
   }
 }

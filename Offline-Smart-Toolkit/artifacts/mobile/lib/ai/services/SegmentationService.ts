@@ -35,7 +35,7 @@ import {
   refineAlpha,
   computeSoftAlpha,
 } from '../processors/alphaMatte';
-import { runBiRefNet, warmUpOnnxModels, resizeRGBABilinear } from './onnxBackend';
+import { runBiRefNet, warmUpOnnxModels, resizeRGBABilinear, lastOrtError } from './onnxBackend';
 import { modelRegistry } from '../ModelRegistry';
 import type { SegmentationResult } from '../types';
 
@@ -295,8 +295,9 @@ export async function segmentSubject(uri: string): Promise<SegmentationResult> {
       // Web: BiRefNet ONNX only. If unavailable, surface a clear error.
       const rawAlpha = await biRefNetAlpha(decoded);
       if (!rawAlpha) {
+        const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
-          'BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/ and restart.',
+          `BiRefNet failed to load${detail}. Ensure birefnet-q.onnx is in public/models/ and restart.`,
         );
       }
       // Post-process at original resolution using original pixels for guided filter
@@ -349,8 +350,9 @@ export async function removeBackgroundPro(
     if (Platform.OS === 'web') {
       const rawAlpha = await biRefNetAlpha(decoded);
       if (!rawAlpha) {
+        const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
-          'BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/ and restart.',
+          `BiRefNet failed to load${detail}. Ensure birefnet-q.onnx is in public/models/ and restart.`,
         );
       }
       alpha = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
@@ -383,7 +385,8 @@ export async function blurBackgroundPro(
     if (Platform.OS === 'web') {
       const rawAlpha = await biRefNetAlpha(decoded);
       if (!rawAlpha) {
-        throw new Error('BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/.');
+        const detail = lastOrtError ? ` (${lastOrtError})` : '';
+        throw new Error(`BiRefNet failed to load${detail}. Ensure birefnet-q.onnx is in public/models/.`);
       }
       subjectWeight = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
     } else {

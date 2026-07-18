@@ -23,18 +23,20 @@ export async function loadOnnxRuntime(): Promise<any> {
   const w = window as any;
   if (!_promise) {
     _promise = new Promise<any>((resolve, reject) => {
-      // Already loaded by a previous call or preload
-      if (w.ort) { resolve(w.ort); return; }
+      // Check all common global locations — ort.min.js (IIFE) sets globalThis.ort
+      const g = (typeof globalThis !== 'undefined' ? globalThis : window) as any;
+      if (g.ort) { resolve(g.ort); return; }
 
       const script = document.createElement('script');
-      // Served from public/ort.min.js — same origin, no CORS
+      // Served from public/ort.min.js (IIFE-wrapped UMD) — same origin, no CORS
       script.src = `${window.location.origin}/ort.min.js`;
       script.async = false; // preserve execution order
       script.onload = () => {
-        if (w.ort) {
-          resolve(w.ort);
+        const loaded = (typeof globalThis !== 'undefined' ? globalThis : window) as any;
+        if (loaded.ort) {
+          resolve(loaded.ort);
         } else {
-          reject(new Error('[ORT] ort.min.js loaded but window.ort is not set'));
+          reject(new Error('[ORT] ort.min.js loaded but globalThis.ort is not set — check the IIFE wrapper'));
         }
       };
       script.onerror = () =>
