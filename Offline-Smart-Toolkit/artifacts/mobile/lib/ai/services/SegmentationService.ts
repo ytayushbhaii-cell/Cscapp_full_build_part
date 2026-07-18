@@ -362,6 +362,19 @@ export async function removeBackgroundPro(
           `BiRefNet failed to load${detail}. Ensure birefnet-q.onnx is in public/models/ and restart.`,
         );
       }
+      // DIAGNOSTIC: log raw alpha distribution before refinement
+      {
+        let aMin = Infinity, aMax = -Infinity, aSum = 0, nFg = 0;
+        for (let _i = 0; _i < rawAlpha.length; _i++) {
+          const v = rawAlpha[_i];
+          if (v < aMin) aMin = v;
+          if (v > aMax) aMax = v;
+          aSum += v;
+          if (v > 0.5) nFg++;
+        }
+        const pFg = ((nFg / rawAlpha.length) * 100).toFixed(1);
+        console.info(`[BiRefNet] Raw alpha (before refine) — min:${aMin.toFixed(3)} max:${aMax.toFixed(3)} mean:${(aSum/rawAlpha.length).toFixed(3)} fg>0.5:${pFg}%`);
+      }
       alpha = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
       report(80); // alpha refinement done
     } else {

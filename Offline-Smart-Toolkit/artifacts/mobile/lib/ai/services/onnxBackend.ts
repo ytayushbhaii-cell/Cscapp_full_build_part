@@ -55,12 +55,21 @@ const BIREFNET_CONFIG: ModelConfig = {
   publicPath: '/models/birefnet-q.onnx',
   urlEnvVar: 'EXPO_PUBLIC_BIREFNET_MODEL_URL',
   inputSize: 1024,
-  // BiRefNet normalization: ImageNet mean/std — (pixel/255 - mean) / std
-  // This is the standard normalization for BiRefNet (zhengpeng7/BiRefNet).
-  // Range after norm: approx [-2.1, 2.6] (not bounded like RMBG's [-0.5, 0.5])
-  mean: [0.485, 0.456, 0.406],
-  std:  [0.229, 0.224, 0.225],
-  outputIsProbability: false, // BiRefNet outputs raw logits; sigmoid applied below
+  // Normalization: raw [0, 1] only (pixel / 255).
+  //
+  // birefnet-q.onnx (44 MB, INT8 quantized) is an RMBG-style model that
+  // bakes both the sigmoid AND the ImageNet Normalize op into the ONNX graph.
+  // If we apply ImageNet normalization externally AND the graph does it again,
+  // the input values become ~[-11, +9] — far outside the model's calibration
+  // range — and the sigmoid at the output saturates to 1.0 everywhere
+  // (entire image = foreground, nothing removed).
+  //
+  // Safe universal input for models-with-baked-normalization: just divide by
+  // 255 so pixel values are in [0, 1].  The internal Normalize layer in the
+  // graph will shift/scale from there correctly.
+  mean: [0, 0, 0],
+  std:  [1, 1, 1],
+  outputIsProbability: false, // sigmoid is baked into the ONNX graph
 };
 
 // ─── URL helpers ──────────────────────────────────────────────────────────────
@@ -366,6 +375,7 @@ export async function runBiRefNet(
     }
 
     const rawData = output.data as Float32Array;
+    console.info(`[BiRefNet] Output tensor dims: [${(output.dims ?? []).join(', ')}], data length: ${rawData.length}`);
 
     // ALWAYS sample the actual output range — do NOT trust outputIsProbability alone.
     // Quantized models (birefnet-q.onnx) often bake sigmoid into the ONNX graph even
@@ -377,16 +387,26 @@ export async function runBiRefNet(
     //       if max|value| ≤ 1.5 sigmoid is already in the graph → copy as-is.
     let needsSigmoid: boolean;
     {
-      let maxAbs = 0;
-      const step = Math.max(1, Math.floor(rawData.length / 2048));
+      let maxAbs = 0, minVal = Infinity, maxVal = -Infinity, sum = 0;
+      let nAbove05 = 0, nBelow05 = 0;
+      const step = Math.max(1, Math.floor(rawData.length / 4096));
+      const sampled = Math.ceil(rawData.length / step);
       for (let i = 0; i < rawData.length; i += step) {
-        const v = Math.abs(rawData[i]);
-        if (v > maxAbs) maxAbs = v;
+        const v = rawData[i];
+        const a = Math.abs(v);
+        if (a > maxAbs) maxAbs = a;
+        if (v < minVal) minVal = v;
+        if (v > maxVal) maxVal = v;
+        sum += v;
+        if (v > 0.5) nAbove05++; else nBelow05++;
       }
+      const mean = sum / sampled;
+      const pctFg = ((nAbove05 / sampled) * 100).toFixed(1);
       needsSigmoid = maxAbs > 1.5;
       console.info(
-        `[BiRefNet] Output range: maxAbs=${maxAbs.toFixed(3)} → ` +
-        `${needsSigmoid ? 'applying sigmoid (logits)' : 'skipping sigmoid (probs already in graph)'}`,
+        `[BiRefNet] Raw output — min:${minVal.toFixed(3)} max:${maxVal.toFixed(3)} ` +
+        `mean:${mean.toFixed(3)} fg>0.5:${pctFg}% → ` +
+        `${needsSigmoid ? 'applying sigmoid (logits)' : 'using as-is (probs)'}`,
       );
     }
 
