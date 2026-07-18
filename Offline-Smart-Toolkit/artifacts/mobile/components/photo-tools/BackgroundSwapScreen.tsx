@@ -76,28 +76,27 @@ export function BackgroundSwapScreen({
     const t0 = Date.now();
 
     try {
-      tick('decode', 'running'); setProgress(5);
-      await new Promise((r) => setTimeout(r, 20)); // yield to re-render
-      tick('decode', 'done', Date.now() - t0); setProgress(15);
+      // Real progress callback — maps pipeline pct to UI state
+      const onProgress = (pct: number) => {
+        setProgress(pct);
+        if (pct >= 3  && pct < 12)  { tick('decode',    'running'); }
+        if (pct >= 12 && pct < 18)  { tick('decode',    'done', Date.now() - t0); }
+        if (pct >= 18 && pct < 65)  { tick('segment',   'running'); }
+        if (pct >= 65 && pct < 80)  { tick('segment',   'done', Date.now() - t0); tick('matte', 'running'); }
+        if (pct >= 80 && pct < 88)  { tick('matte',     'done', Date.now() - t0); tick('composite', 'running'); }
+        if (pct >= 88 && pct < 100) { tick('composite', 'done', Date.now() - t0); tick('encode', 'running'); }
+        if (pct >= 100)             { tick('encode',     'done', Date.now() - t0); }
+      };
 
-      tick('segment', 'running'); setProgress(20);
       const t1 = Date.now();
-      // removeBackground now internally calls SegmentationService with soft matting
-      const out = await removeBackground(image.uri, preset);
-      tick('segment', 'done', Date.now() - t1); setProgress(65);
-
-      tick('matte', 'running'); setProgress(70);
-      await new Promise((r) => setTimeout(r, 10));
-      tick('matte', 'done', 0); // done inside removeBackground
-      setProgress(78);
-
-      tick('composite', 'running'); setProgress(82);
-      await new Promise((r) => setTimeout(r, 10));
-      tick('composite', 'done', 0); setProgress(88);
-
-      tick('encode', 'running'); setProgress(92);
-      await new Promise((r) => setTimeout(r, 10));
-      tick('encode', 'done', Date.now() - t0); setProgress(100);
+      const out = await removeBackground(image.uri, preset, undefined, onProgress);
+      // Ensure all steps show done if callback didn't fire 100 (e.g. native path)
+      tick('decode',    'done', 0);
+      tick('segment',   'done', Date.now() - t1);
+      tick('matte',     'done', 0);
+      tick('composite', 'done', 0);
+      tick('encode',    'done', Date.now() - t0);
+      setProgress(100);
 
       setResult(out);
       const fileName = guessFileName(toolId, 'png');

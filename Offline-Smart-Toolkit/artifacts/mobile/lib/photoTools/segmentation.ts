@@ -57,6 +57,7 @@ export async function removeBackground(
   uri: string,
   preset: BackgroundPreset,
   customColor?: [number, number, number],
+  onProgress?: (pct: number) => void,
 ): Promise<{ uri: string; width: number; height: number }> {
   let bgColor: [number, number, number] | null = null;
   if (preset === 'transparent') {
@@ -66,7 +67,7 @@ export async function removeBackground(
   } else {
     bgColor = BG_COLORS[preset as string] ?? [255, 255, 255];
   }
-  return removeBackgroundPro(uri, bgColor);
+  return removeBackgroundPro(uri, bgColor, onProgress);
 }
 
 /**

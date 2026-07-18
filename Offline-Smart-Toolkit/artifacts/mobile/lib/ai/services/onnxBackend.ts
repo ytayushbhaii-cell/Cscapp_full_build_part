@@ -367,19 +367,27 @@ export async function runBiRefNet(
 
     const rawData = output.data as Float32Array;
 
-    // Smart sigmoid detection: if all values are already in [0, 1] the ONNX
-    // graph already includes sigmoid (typical for RMBG-1.4 / RMBG-2.0 exports).
-    // If values exceed 1 or go below -0.01 they are logits and need sigmoid.
-    let needsSigmoid = cfg.outputIsProbability === false;
-    if (!needsSigmoid) {
-      // Double-check by sampling the range
+    // ALWAYS sample the actual output range — do NOT trust outputIsProbability alone.
+    // Quantized models (birefnet-q.onnx) often bake sigmoid into the ONNX graph even
+    // when the full-precision export doesn't. If we blindly apply sigmoid again, a
+    // background pixel with probability ~0.02 becomes sigmoid(0.02) ≈ 0.505 → the
+    // entire image is treated as foreground and nothing gets removed.
+    //
+    // Rule: if max|value| > 1.5 the outputs are raw logits → apply sigmoid.
+    //       if max|value| ≤ 1.5 sigmoid is already in the graph → copy as-is.
+    let needsSigmoid: boolean;
+    {
       let maxAbs = 0;
       const step = Math.max(1, Math.floor(rawData.length / 2048));
       for (let i = 0; i < rawData.length; i += step) {
         const v = Math.abs(rawData[i]);
         if (v > maxAbs) maxAbs = v;
       }
-      needsSigmoid = maxAbs > 1.5; // logits typically reach ±5 or more
+      needsSigmoid = maxAbs > 1.5;
+      console.info(
+        `[BiRefNet] Output range: maxAbs=${maxAbs.toFixed(3)} → ` +
+        `${needsSigmoid ? 'applying sigmoid (logits)' : 'skipping sigmoid (probs already in graph)'}`,
+      );
     }
 
     const probMap = new Float32Array(rawData.length);

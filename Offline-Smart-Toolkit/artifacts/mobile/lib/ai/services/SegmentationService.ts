@@ -341,14 +341,21 @@ export async function segmentSubject(uri: string): Promise<SegmentationResult> {
 export async function removeBackgroundPro(
   uri: string,
   bgColor: [number, number, number] | null,
+  onProgress?: (pct: number) => void,
 ): Promise<{ uri: string; width: number; height: number }> {
+  const report = (pct: number) => onProgress?.(Math.round(pct));
+
   const inner = async () => {
+    report(3);
     const decoded = await decodeImage(uri);
+    report(12); // image decoded
 
     let alpha: Float32Array;
 
     if (Platform.OS === 'web') {
+      report(18); // about to run inference
       const rawAlpha = await biRefNetAlpha(decoded);
+      report(65); // ONNX inference done (the heavy part)
       if (!rawAlpha) {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
@@ -356,13 +363,18 @@ export async function removeBackgroundPro(
         );
       }
       alpha = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
+      report(80); // alpha refinement done
     } else {
+      report(18);
       alpha = await bodyPixAlpha(decoded);
+      report(75);
     }
 
     // Composite at original resolution → preserves every source pixel
     const rgba   = compositeWithSoftAlpha(decoded.origPixels, alpha, decoded.origW, decoded.origH, bgColor);
+    report(88); // composite done
     const outUri = await writePngFromRGBA(rgba, decoded.origW, decoded.origH);
+    report(100); // PNG encoded
     return { uri: outUri, width: decoded.origW, height: decoded.origH };
   };
 
