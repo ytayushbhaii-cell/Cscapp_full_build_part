@@ -27,6 +27,7 @@
 
 import { Platform } from 'react-native';
 import { loadOnnxRuntime } from './ortLoader';
+import { modelRegistry } from '../ModelRegistry';
 
 // ─── Model config ─────────────────────────────────────────────────────────────
 
@@ -97,44 +98,114 @@ let sessionPromise: Promise<OnnxSession | null> | null = null;
 /** Stores the last ORT load error so callers can surface a useful message. */
 export let lastOrtError: string | null = null;
 
+/** Current load status — readable without awaiting the session promise. */
+export type BiRefNetLoadStatus = 'pending' | 'loading' | 'loaded' | 'error';
+export let birefNetLoadStatus: BiRefNetLoadStatus = 'pending';
+
+// ─── Preflight model check ────────────────────────────────────────────────────
+
+/**
+ * Verifies the model file is reachable via HTTP before loading the full session.
+ *
+ * - 404 / network error → file is missing; surfaces a clear "file not found" message.
+ * - Content-Length present but suspiciously small (< 1 MB) → likely corrupted or truncated.
+ * - Returns normally on success so loadSession can proceed.
+ */
+async function preflightModelCheck(modelUrl: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(modelUrl, { method: 'HEAD' });
+  } catch (networkErr: any) {
+    throw new Error(
+      `[BiRefNet] Cannot reach model at ${modelUrl} — network error: ${networkErr?.message ?? networkErr}. ` +
+      'Ensure the dev server is running and public/models/birefnet-q.onnx is present.',
+    );
+  }
+
+  if (response.status === 404) {
+    throw new Error(
+      `[BiRefNet] Model file not found (HTTP 404): ${modelUrl}. ` +
+      'Create the public/models/ directory and place birefnet-q.onnx inside it.',
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `[BiRefNet] Model file returned HTTP ${response.status} from ${modelUrl}. ` +
+      'Check that the file exists in public/models/ and the dev server is serving it.',
+    );
+  }
+
+  // Content-Length sanity check — birefnet-q.onnx is ~44 MB; anything under 1 MB
+  // is almost certainly a truncated or placeholder file.
+  const contentLength = response.headers.get('content-length');
+  if (contentLength !== null) {
+    const bytes = parseInt(contentLength, 10);
+    const MIN_EXPECTED_BYTES = 1_000_000; // 1 MB minimum sanity threshold
+    if (!isNaN(bytes) && bytes < MIN_EXPECTED_BYTES) {
+      throw new Error(
+        `[BiRefNet] Model file at ${modelUrl} appears corrupted or truncated ` +
+        `(Content-Length: ${bytes} bytes, expected ≥ ${MIN_EXPECTED_BYTES}). ` +
+        'Replace public/models/birefnet-q.onnx with the correct file.',
+      );
+    }
+  }
+}
+
 // ─── Session loader ───────────────────────────────────────────────────────────
 
 async function loadSession(): Promise<OnnxSession | null> {
   if (Platform.OS !== 'web') return null;
 
   const modelUrl = getModelUrl();
+  birefNetLoadStatus = 'loading';
+  modelRegistry.setStatus('birefnet', 'ai-loading');
 
   try {
-    // Load ORT via <script> tag (ortLoader.web.ts) — Metro never bundles ORT
-    // because every ORT JS file contains import(webpackIgnore) which Metro rejects.
+    // ── Step 1: Verify the model file is reachable and not corrupted ──────────
+    await preflightModelCheck(modelUrl);
+
+    // ── Step 2: Load ORT via <script> tag (ortLoader.web.ts) ──────────────────
+    // Metro never bundles ORT because every ORT JS file contains
+    // import(webpackIgnore) dynamic-import calls which Metro rejects.
     const ort = await loadOnnxRuntime();
     if (!ort) {
       console.warn('[BiRefNet] ORT unavailable on this platform');
+      birefNetLoadStatus = 'error';
+      modelRegistry.setStatus('birefnet', 'ai-unavailable');
       return null;
     }
 
-    // Configure WASM path — both threaded and asyncify WASMs are in public/ort-wasm/.
+    // ── Step 3: Configure WASM paths ──────────────────────────────────────────
     // ORT auto-selects:
-    //   - ort-wasm-simd-threaded.wasm         if SharedArrayBuffer available
+    //   - ort-wasm-simd-threaded.wasm         if SharedArrayBuffer is available
     //   - ort-wasm-simd-threaded.asyncify.wasm if not (Replit dev, no COOP/COEP headers)
-    ort.env.wasm.wasmPaths = getWasmDir();
-
     // Do NOT force numThreads — let ORT auto-detect based on SharedArrayBuffer
     // availability. Forcing 1 causes ORT to look for a non-existent non-threaded
-    // WASM file; the auto-detect path correctly uses asyncify when threads aren't available.
+    // WASM file; auto-detect correctly uses asyncify when threads aren't available.
+    ort.env.wasm.wasmPaths = getWasmDir();
 
+    // ── Step 4: Create ONNX inference session ─────────────────────────────────
     const session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     });
 
-    console.info(`[BiRefNet] ✓ Model loaded from ${modelUrl}`);
+    // ── Step 5: Mark as loaded and notify ────────────────────────────────────
+    birefNetLoadStatus = 'loaded';
+    modelRegistry.setStatus('birefnet', 'ai-cached');
+    console.info(
+      `[BiRefNet] ✅ BiRefNet Loaded Successfully — model: ${modelUrl}, ` +
+      `inputs: ${session.inputNames?.join(', ')}, outputs: ${session.outputNames?.join(', ')}`,
+    );
     return session;
   } catch (err: any) {
     const msg: string = err?.message ?? String(err);
     lastOrtError = msg;
-    // Surface the real error — "BiRefNet model not loaded" is too vague
-    console.error('[BiRefNet] Load failed:', msg, err);
+    birefNetLoadStatus = 'error';
+    modelRegistry.setStatus('birefnet', 'ai-unavailable');
+    // Surface the full error — "BiRefNet model not loaded" is too vague for debugging
+    console.error('[BiRefNet] ❌ Load failed:', msg);
     return null;
   }
 }
@@ -147,7 +218,11 @@ export function getBiRefNetSession(): Promise<OnnxSession | null> {
   return sessionPromise;
 }
 
-/** Pre-warm the model (call during app startup to amortise first-inference delay). */
+/**
+ * Pre-warm the model (call during app startup to amortise first-inference delay).
+ * Also runs the preflight model-file check so any missing/corrupted file is
+ * reported in the console immediately rather than on first use.
+ */
 export function warmUpOnnxModels(): void {
   if (Platform.OS !== 'web') return;
   getBiRefNetSession().catch(() => {});
