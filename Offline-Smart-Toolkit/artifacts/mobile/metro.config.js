@@ -1,5 +1,6 @@
 // Learn more https://docs.expo.dev/guides/monorepos
 const { getDefaultConfig } = require('expo/metro-config');
+const path = require('path');
 
 const config = getDefaultConfig(__dirname);
 
@@ -11,6 +12,22 @@ const config = getDefaultConfig(__dirname);
 // CJS build (under "main") works correctly on every platform, so force
 // "main" to take priority everywhere.
 config.resolver.resolverMainFields = ['react-native', 'main', 'browser', 'module'];
+
+// Belt-and-suspenders fix for pdf-lib: explicitly redirect the module to its
+// CJS build regardless of what the platform resolver chooses. Expo SDK 50+
+// enables package `exports` resolution for web, which can override the field
+// order above and pick the ES build (whose tslib shim has no default export).
+const pdfLibCjsEntry = path.resolve(
+  __dirname,
+  '../../node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib/cjs/index.js'
+);
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === 'pdf-lib') {
+    return { filePath: pdfLibCjsEntry, type: 'sourceFile' };
+  }
+  // Fall through to the default resolver for everything else
+  return context.resolveRequest(context, moduleName, platform);
+};
 
 // Register ONNX model files and WebAssembly binaries as static assets so
 // Metro can serve them. Place BiRefNet / RMBG-2.0 .onnx files under

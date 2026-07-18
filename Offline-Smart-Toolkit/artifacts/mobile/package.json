@@ -18,6 +18,8 @@
     "@tensorflow/tfjs-backend-cpu": "^4.22.0",
     "@tensorflow/tfjs-react-native": "^1.0.0",
     "base64-js": "^1.5.1",
+    "expo-clipboard": "^8.0.8",
+    "expo-document-picker": "^14.0.8",
     "expo-file-system": "^19.0.23",
     "expo-image-manipulator": "^14.0.8",
     "expo-media-library": "^18.2.1",
@@ -26,7 +28,9 @@
     "jszip": "^3.10.1",
     "onnxruntime-web": "^1.27.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200",
     "react-native-view-shot": "4.0.3",
+    "tesseract.js": "^7.0.0",
     "upng-js": "^2.1.0"
   },
   "devDependencies": {

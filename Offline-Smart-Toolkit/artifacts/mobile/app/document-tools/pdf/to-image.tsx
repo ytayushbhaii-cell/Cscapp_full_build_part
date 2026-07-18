@@ -1,123 +1,311 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
+  ScrollView, Image, Platform,
+} from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { useTheme } from '@/context/ThemeContext';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
+import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { DocUploadWidget } from '@/components/document-tools/DocUploadWidget';
 import type { DocPickResult } from '@/components/document-tools/DocUploadWidget';
 import { getPdfInfo } from '@/lib/features/documents/pdf/pdfService';
-import type { PdfInfo } from '@/lib/features/documents/types';
+import { pdfPageToImages } from '@/lib/features/documents/pdf/pdfToImageService';
+import type { PdfInfo, PdfToImageResult } from '@/lib/features/documents/types';
 
 const COLOR = '#EF4444';
-
-const ARCH_POINTS = [
-  { icon: 'web', label: 'Web: pdf.js canvas rendering → PNG/JPEG export' },
-  { icon: 'cellphone', label: 'Native: react-native-pdf or Flutter PDF renderer' },
-  { icon: 'robot-outline', label: 'AI: MediaPipe document detection for auto-alignment' },
+const FORMAT_OPTIONS: { label: string; value: 'jpeg' | 'png' }[] = [
+  { label: 'JPEG', value: 'jpeg' },
+  { label: 'PNG', value: 'png' },
+];
+const SCALE_OPTIONS: { label: string; value: number }[] = [
+  { label: '1× (72 DPI)', value: 1 },
+  { label: '2× (144 DPI)', value: 2 },
+  { label: '3× (216 DPI)', value: 3 },
 ];
 
 export default function PdfToImageScreen() {
   const colors = useColors();
-  const router = useRouter();
   const [file, setFile] = useState<DocPickResult | null>(null);
   const [pdfInfo, setPdfInfo] = useState<PdfInfo | null>(null);
+  const [format, setFormat] = useState<'jpeg' | 'png'>('jpeg');
+  const [scale, setScale] = useState<number>(2);
+  const [results, setResults] = useState<PdfToImageResult[]>([]);
+  const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reset = () => {
     setFile(null);
     setPdfInfo(null);
+    setResults([]);
     setError(null);
   };
 
   const handleFilePicked = async (picked: DocPickResult) => {
     setFile(picked);
     setPdfInfo(null);
+    setResults([]);
     setError(null);
     try {
       const info = await getPdfInfo(picked.uri, picked.size);
       setPdfInfo(info);
     } catch {
-      // Non-critical — just show upload info
+      // Non-critical
     }
   };
 
+  const process = async () => {
+    if (!file) return;
+    setProcessing(true);
+    setError(null);
+    setResults([]);
+    try {
+      const imgs = await pdfPageToImages(file.uri, undefined, format, scale);
+      if (imgs[0]?.isStub) {
+        setError(imgs[0].stubMessage ?? 'PDF to Image requires web preview.');
+      } else {
+        setResults(imgs);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? 'Conversion failed. Please try again.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const downloadImage = (img: PdfToImageResult) => {
+    if (Platform.OS === 'web') {
+      const a = document.createElement('a');
+      a.href = img.uri;
+      a.download = `page-${img.pageNumber}.${format}`;
+      a.click();
+    }
+  };
+
+  const downloadAll = () => {
+    results.forEach((img) => {
+      setTimeout(() => downloadImage(img), (img.pageNumber - 1) * 120);
+    });
+  };
+
   return (
-    <ToolScreenLayout title="PDF to Image" subtitle="Convert PDF pages to images" iconName="file-image-outline" color={COLOR} onReset={reset}>
-      <DocUploadWidget file={file} onPicked={handleFilePicked} onError={setError} color={COLOR} accept="pdf" label="Upload PDF" />
+    <ToolScreenLayout
+      title="PDF to Image"
+      subtitle="Convert PDF pages to PNG / JPEG"
+      iconName="file-image-outline"
+      color={COLOR}
+      onReset={reset}
+    >
+      {error && <StatusBanner type="error" message={error} />}
+
+      <DocUploadWidget
+        file={file}
+        onPicked={handleFilePicked}
+        onError={setError}
+        color={COLOR}
+        accept="pdf"
+        label="Upload PDF"
+      />
 
       {pdfInfo && (
         <View style={[styles.infoBox, { backgroundColor: COLOR + '12', borderColor: COLOR + '30', borderRadius: colors.radius }]}>
-          <MaterialCommunityIcons name="information-outline" size={15} color={COLOR} />
+          <MaterialCommunityIcons name="file-pdf-box" size={15} color={COLOR} />
           <Text style={[styles.infoText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
-            PDF loaded: {pdfInfo.pageCount} page{pdfInfo.pageCount !== 1 ? 's' : ''} detected.
+            {pdfInfo.pageCount} page{pdfInfo.pageCount !== 1 ? 's' : ''} detected
+            {pdfInfo.encrypted ? ' · 🔒 Encrypted' : ''}
           </Text>
         </View>
       )}
 
-      {/* Architecture info */}
-      <View style={[styles.archCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <View style={styles.archHeader}>
-          <View style={[styles.archBadge, { backgroundColor: '#F59E0B' + '20', borderRadius: 20 }]}>
-            <MaterialCommunityIcons name="chip" size={14} color="#F59E0B" />
-            <Text style={[styles.archBadgeText, { color: '#F59E0B', fontFamily: 'Inter_600SemiBold' }]}>Architecture Ready</Text>
+      {file && results.length === 0 && (
+        <>
+          {/* Format */}
+          <View style={styles.section}>
+            <Text style={[styles.label, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+              Output Format
+            </Text>
+            <View style={styles.row}>
+              {FORMAT_OPTIONS.map((opt) => {
+                const active = format === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    onPress={() => setFormat(opt.value)}
+                    style={[styles.chip, {
+                      borderColor: active ? COLOR : colors.border,
+                      backgroundColor: active ? COLOR + '14' : colors.card,
+                      borderRadius: colors.radius - 4,
+                    }]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.chipLabel, {
+                      color: active ? COLOR : colors.foreground,
+                      fontFamily: active ? 'Inter_700Bold' : 'Inter_400Regular',
+                    }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
-        </View>
-        <Text style={[styles.archTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          PDF → Image Conversion
-        </Text>
-        <Text style={[styles.archDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-          PDF → Image conversion requires pdf.js (web) or react-native-pdf (native). Full implementation is in the AI-ready architecture layer.
-        </Text>
-        <View style={styles.archPoints}>
-          {ARCH_POINTS.map((p) => (
-            <View key={p.label} style={styles.archPoint}>
-              <MaterialCommunityIcons name={p.icon as any} size={14} color={COLOR} />
-              <Text style={[styles.archPointText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>{p.label}</Text>
+
+          {/* Scale */}
+          <View style={styles.section}>
+            <Text style={[styles.label, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+              Resolution
+            </Text>
+            <View style={styles.row}>
+              {SCALE_OPTIONS.map((opt) => {
+                const active = scale === opt.value;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    onPress={() => setScale(opt.value)}
+                    style={[styles.chip, {
+                      borderColor: active ? COLOR : colors.border,
+                      backgroundColor: active ? COLOR + '14' : colors.card,
+                      borderRadius: colors.radius - 4,
+                    }]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.chipLabel, {
+                      color: active ? COLOR : colors.foreground,
+                      fontFamily: active ? 'Inter_700Bold' : 'Inter_400Regular',
+                    }]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {Platform.OS !== 'web' && (
+            <View style={[styles.archBox, { backgroundColor: '#F59E0B' + '14', borderColor: '#F59E0B' + '40', borderRadius: colors.radius }]}>
+              <MaterialCommunityIcons name="information-outline" size={15} color="#F59E0B" />
+              <Text style={[styles.infoText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
+                PDF to Image conversion is available on the web preview. On native, use a PDF viewer app.
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.btn, {
+              backgroundColor: Platform.OS !== 'web' ? colors.muted : COLOR,
+              borderRadius: colors.radius - 2,
+            }]}
+            onPress={process}
+            disabled={processing || Platform.OS !== 'web'}
+            activeOpacity={0.85}
+          >
+            {processing ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <MaterialCommunityIcons name="file-image-outline" size={18} color="#fff" />
+            )}
+            <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+              {processing ? 'Converting…' : 'Convert to Images'}
+            </Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {results.length > 0 && (
+        <View style={styles.section}>
+          {/* Success summary */}
+          <View style={[styles.resultHeader, { backgroundColor: '#22C55E' + '14', borderColor: '#22C55E' + '40', borderRadius: colors.radius }]}>
+            <MaterialCommunityIcons name="check-circle" size={16} color="#22C55E" />
+            <Text style={[styles.resultHeaderText, { color: '#22C55E', fontFamily: 'Inter_600SemiBold' }]}>
+              {results.length} page{results.length !== 1 ? 's' : ''} converted to {format.toUpperCase()}
+            </Text>
+          </View>
+
+          {/* Download All */}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
+              style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+              onPress={downloadAll}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons name="download-multiple" size={18} color="#fff" />
+              <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+                Download All ({results.length})
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Image previews */}
+          {results.map((img) => (
+            <View key={img.pageNumber} style={[styles.imgCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+              <Image
+                source={{ uri: img.uri }}
+                style={[styles.imgPreview, { borderRadius: colors.radius - 4 }]}
+                resizeMode="contain"
+              />
+              <View style={styles.imgFooter}>
+                <View style={styles.imgMeta}>
+                  <MaterialCommunityIcons name="file-image" size={14} color={COLOR} />
+                  <Text style={[styles.imgLabel, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+                    Page {img.pageNumber}
+                  </Text>
+                  <Text style={[styles.imgDims, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                    {img.width} × {img.height}
+                  </Text>
+                </View>
+                {Platform.OS === 'web' && (
+                  <TouchableOpacity
+                    style={[styles.dlBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 6 }]}
+                    onPress={() => downloadImage(img)}
+                    activeOpacity={0.85}
+                  >
+                    <MaterialCommunityIcons name="download" size={14} color="#fff" />
+                    <Text style={[styles.dlBtnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+                      Download
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           ))}
-        </View>
-      </View>
 
-      {/* Alternative */}
-      <View style={[styles.altCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-        <View style={styles.altHeader}>
-          <MaterialCommunityIcons name="swap-horizontal" size={18} color={COLOR} />
-          <Text style={[styles.altTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Alternative Available</Text>
+          <TouchableOpacity
+            style={[styles.resetBtn, { borderColor: colors.border, borderRadius: colors.radius - 2 }]}
+            onPress={reset}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="refresh" size={16} color={colors.foreground} />
+            <Text style={[styles.resetBtnText, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
+              Convert Another PDF
+            </Text>
+          </TouchableOpacity>
         </View>
-        <Text style={[styles.altDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-          Use "Image to PDF" to convert images to PDF format instead.
-        </Text>
-        <TouchableOpacity
-          style={[styles.altBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 4 }]}
-          onPress={() => router.push('/document-tools/pdf/from-image' as any)}
-          activeOpacity={0.85}
-        >
-          <MaterialCommunityIcons name="file-pdf-box" size={16} color="#fff" />
-          <Text style={[styles.altBtnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>Go to Image to PDF</Text>
-        </TouchableOpacity>
-      </View>
+      )}
     </ToolScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
+  section: { gap: 10 },
+  label: { fontSize: 13 },
+  row: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  chip: { borderWidth: 1, paddingVertical: 8, paddingHorizontal: 14 },
+  chipLabel: { fontSize: 12 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  btnText: { fontSize: 14 },
   infoBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, borderWidth: 1 },
+  archBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, borderWidth: 1 },
   infoText: { fontSize: 12, flex: 1, lineHeight: 18 },
-  archCard: { borderWidth: 1, padding: 16, gap: 10 },
-  archHeader: { flexDirection: 'row' },
-  archBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4 },
-  archBadgeText: { fontSize: 11 },
-  archTitle: { fontSize: 15 },
-  archDesc: { fontSize: 13, lineHeight: 20 },
-  archPoints: { gap: 8, marginTop: 4 },
-  archPoint: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  archPointText: { fontSize: 12, flex: 1, lineHeight: 18 },
-  altCard: { borderWidth: 1, padding: 16, gap: 10 },
-  altHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  altTitle: { fontSize: 14 },
-  altDesc: { fontSize: 12, lineHeight: 18 },
-  altBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 },
-  altBtnText: { fontSize: 13 },
+  resultHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderWidth: 1 },
+  resultHeaderText: { fontSize: 13 },
+  imgCard: { borderWidth: 1, overflow: 'hidden' },
+  imgPreview: { width: '100%', height: 260, backgroundColor: '#00000008' },
+  imgFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, gap: 8 },
+  imgMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  imgLabel: { fontSize: 13 },
+  imgDims: { fontSize: 11 },
+  dlBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 7, paddingHorizontal: 12 },
+  dlBtnText: { fontSize: 12 },
+  resetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderWidth: 1 },
+  resetBtnText: { fontSize: 13 },
 });

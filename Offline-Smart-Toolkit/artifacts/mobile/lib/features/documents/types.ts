@@ -80,3 +80,12 @@ export interface PdfInfo {
   fileSizeBytes: number;
   encrypted: boolean;
 }
+
+export interface PdfToImageResult {
+  pageNumber: number;
+  uri: string;
+  width: number;
+  height: number;
+  isStub: boolean;
+  stubMessage?: string;
+}

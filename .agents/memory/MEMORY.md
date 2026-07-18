@@ -1,4 +1,5 @@
 - [pdf-lib Metro web crash](pdf-lib-metro-web.md) — pdf-lib's ES build imports tslib@1.x ESM shim which lacks default export; fix via `.web.ts` platform-extension stub (don't import pdf-lib on web).
+- [Metro pdf-lib CJS resolver fix](metro-pdf-lib-cjs-fix.md) — `resolverMainFields` alone insufficient for Expo SDK 50+ web; use `resolveRequest` override in metro.config.js to force pdf-lib → CJS build.
 - [tfjs-react-native barrel imports](tfjs-barrel-imports.md) — barrel unconditionally pulls expo-camera/expo-gl/react-native-fs; deep-import `decodeJpeg` from `@tensorflow/tfjs-react-native/dist/decode_image` instead.
 - [Metro platform extension vs runtime guard](metro-platform-extension.md) — Metro statically analyzes require() regardless of runtime Platform.OS checks; use `.web.ts` / `.native.ts` extension files for libs with broken web builds.
 - [RN Slider removed from core](rn-community-slider.md) — React Native dropped bundled Slider; use `@react-native-community/slider` in this project.
