@@ -1,173 +1,181 @@
 /**
- * ONNX Backend — BiRefNet & RMBG-2.0 via onnxruntime-web (Expo Web only).
+ * ONNX Backend — BiRefNet via onnxruntime-web (Expo Web).
  *
- * ─── Quick-start (three env vars, then restart) ──────────────────────────────
+ * ─── Auto-loading (no configuration needed) ─────────────────────────────────
+ * The model and ORT WASM binaries are bundled in the app's `public/` directory
+ * and served at these paths by the Expo dev server and production build:
  *
- *   # 1. Copy ORT WASM binaries somewhere your web server can reach them
- *   cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm  <web-root>/
- *   cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm <web-root>/
+ *   public/models/birefnet-q.onnx          → /models/birefnet-q.onnx
+ *   public/ort-wasm/ort-wasm-simd-threaded.wasm → /ort-wasm/...
  *
- *   # 2. Set env vars (in .env or your deployment config)
- *   EXPO_PUBLIC_ORT_WASM_DIR=http://localhost:5000/                 # dir containing ORT .wasm files
- *   EXPO_PUBLIC_BIREFNET_MODEL_URL=http://localhost:8080/birefnet.onnx  # primary model
- *   EXPO_PUBLIC_RMBG2_MODEL_URL=http://localhost:8080/rmbg2.onnx        # fallback model
+ * Everything is served from the same origin — 100% offline, zero network.
  *
- *   # 3. Restart the app — the status badge will show "BiRefNet · ONNX"
+ * ─── Optional env-var overrides ─────────────────────────────────────────────
+ * You can still override the auto-detected paths via environment variables:
  *
- * When none of these variables are set the backend is disabled and the caller
- * automatically falls back to BodyPix + the full guided-filter pipeline.
- *
- * ─── Why env vars instead of bundled assets? ────────────────────────────────
- * ONNX model weights are 44 MB–374 MB. Bundling them as Metro assets would
- * make the JS bundle impractical for distribution. Env vars let each
- * deployment serve the model bytes from wherever makes sense for that
- * context (local file server, NAS, CDN, Expo static export, etc.).
- *
- * ─── Post-processing contract ───────────────────────────────────────────────
- * This module returns a RAW sigmoid alpha from the model (no refinement).
- * The caller (SegmentationService) applies `refineAlpha()` — the same shared
- * SAM2 → guided-filter → edge-polish pipeline — to ALL backends, so quality
- * is identical regardless of which model is active.
+ *   EXPO_PUBLIC_BIREFNET_MODEL_URL   Override model URL (e.g. local HTTP server)
+ *   EXPO_PUBLIC_ORT_WASM_DIR         Override WASM directory URL
  *
  * ─── Native ─────────────────────────────────────────────────────────────────
  * Returns null immediately on native — onnxruntime-react-native is a
- * separate optional upgrade (see follow-up tasks).
+ * separate optional upgrade.
+ *
+ * ─── Post-processing contract ────────────────────────────────────────────────
+ * Returns a RAW probability alpha map (0–1). The caller (SegmentationService)
+ * applies refineAlpha() — the SAM2 → guided-filter → edge-polish pipeline.
  */
 
 import { Platform } from 'react-native';
 
 // ─── Model config ─────────────────────────────────────────────────────────────
 
-export type OnnxModelId = 'birefnet' | 'rmbg2';
+export type OnnxModelId = 'birefnet';
 
 interface ModelConfig {
   id: OnnxModelId;
-  /** EXPO_PUBLIC_* env var the user sets to the model's HTTP URL */
+  /** Path relative to origin, served from public/models/ */
+  publicPath: string;
+  /** Env var override for the model URL */
   urlEnvVar: string;
   inputSize: number;
   mean: [number, number, number];
   std:  [number, number, number];
+  /**
+   * Whether the ONNX graph outputs raw logits (true) or already-sigmoid
+   * probabilities (false). RMBG-1.4 and RMBG-2.0 include sigmoid in the
+   * graph; BiRefNet fp32 exports are logits.
+   */
+  outputIsProbability: boolean;
 }
 
-const MODEL_CONFIGS: Record<OnnxModelId, ModelConfig> = {
-  birefnet: {
-    id: 'birefnet',
-    urlEnvVar: 'EXPO_PUBLIC_BIREFNET_MODEL_URL',
-    inputSize: 1024,
-    mean: [0.485, 0.456, 0.406],
-    std:  [0.229, 0.224, 0.225],
-  },
-  rmbg2: {
-    id: 'rmbg2',
-    urlEnvVar: 'EXPO_PUBLIC_RMBG2_MODEL_URL',
-    inputSize: 1024,
-    mean: [0.5, 0.5, 0.5],
-    std:  [1.0, 1.0, 1.0],
-  },
+const BIREFNET_CONFIG: ModelConfig = {
+  id: 'birefnet',
+  publicPath: '/models/birefnet-q.onnx',
+  urlEnvVar: 'EXPO_PUBLIC_BIREFNET_MODEL_URL',
+  inputSize: 1024,
+  // RMBG-1.4 / RMBG-2.0 normalization: (pixel/255 - 0.5) / 1.0 → range [-0.5, 0.5]
+  mean: [0.5, 0.5, 0.5],
+  std:  [1.0, 1.0, 1.0],
+  outputIsProbability: true, // RMBG-1.4 ONNX includes sigmoid in graph
 };
 
-// ─── Env-var helpers ──────────────────────────────────────────────────────────
+// ─── URL helpers ──────────────────────────────────────────────────────────────
 
 function envStr(key: string): string | null {
   const v = (process.env as Record<string, string | undefined>)[key];
   return v && v.trim().length > 0 ? v.trim() : null;
 }
 
-/** URL of the ONNX model, or null if not configured. */
-function getModelUrl(id: OnnxModelId): string | null {
-  return envStr(MODEL_CONFIGS[id].urlEnvVar);
+/** The URL of the BiRefNet model. Env var overrides bundled path. */
+function getModelUrl(): string {
+  const override = envStr(BIREFNET_CONFIG.urlEnvVar);
+  if (override) return override;
+  // Auto-detect from current origin (public/ is served at root)
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}${BIREFNET_CONFIG.publicPath}`;
+  }
+  return BIREFNET_CONFIG.publicPath;
 }
 
-/**
- * Directory URL containing the ORT WASM binaries, e.g. `http://localhost:5000/`.
- * When null, ORT uses its own default lookup (works if WASM is at the same origin
- * as the JS bundle — e.g. after `expo export` with WASM copied to dist/).
- */
-function getOrtWasmDir(): string | null {
-  return envStr('EXPO_PUBLIC_ORT_WASM_DIR');
+/** Directory URL containing the ORT WASM binaries. */
+function getWasmDir(): string {
+  const override = envStr('EXPO_PUBLIC_ORT_WASM_DIR');
+  if (override) return override.endsWith('/') ? override : override + '/';
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/ort-wasm/`;
+  }
+  return '/ort-wasm/';
 }
 
 // ─── Session cache ────────────────────────────────────────────────────────────
 
 type OnnxSession = import('onnxruntime-web').InferenceSession;
-const sessionCache = new Map<OnnxModelId, Promise<OnnxSession | null>>();
+let sessionPromise: Promise<OnnxSession | null> | null = null;
 
 // ─── Session loader ───────────────────────────────────────────────────────────
 
-async function loadSession(modelId: OnnxModelId): Promise<OnnxSession | null> {
+async function loadSession(): Promise<OnnxSession | null> {
   if (Platform.OS !== 'web') return null;
 
-  const modelUrl = getModelUrl(modelId);
-  if (!modelUrl) return null; // user has not configured this model
+  const modelUrl = getModelUrl();
 
   try {
-    // Dynamic import keeps the ~2 MB ORT bundle out of native builds.
     const ort = await import('onnxruntime-web');
 
-    // Configure WASM path from env var (optional — ORT tries same-origin by default)
-    const wasmDir = getOrtWasmDir();
-    if (wasmDir) {
-      ort.env.wasm.wasmPaths = wasmDir.endsWith('/') ? wasmDir : wasmDir + '/';
-    }
+    // Configure WASM path — bundled in public/ort-wasm/
+    ort.env.wasm.wasmPaths = getWasmDir();
 
-    // Multi-threaded inference where available
+    // Use as many threads as the device has (capped at 4 for stability)
     ort.env.wasm.numThreads =
-      typeof navigator !== 'undefined' ? Math.min(navigator.hardwareConcurrency ?? 2, 4) : 2;
+      typeof navigator !== 'undefined'
+        ? Math.min(navigator.hardwareConcurrency ?? 2, 4)
+        : 2;
 
     const session = await ort.InferenceSession.create(modelUrl, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     });
-    console.info(`[OnnxBackend] ✓ ${modelId} loaded from ${modelUrl}`);
+
+    console.info(`[BiRefNet] ✓ Model loaded from ${modelUrl}`);
     return session;
-  } catch (err) {
-    // Provide actionable guidance in the console instead of swallowing the error
-    const hint = getOrtWasmDir()
-      ? ''
-      : ' (Tip: set EXPO_PUBLIC_ORT_WASM_DIR to the directory hosting ORT .wasm files)';
-    console.warn(`[OnnxBackend] Could not load ${modelId} from ${modelUrl}:${hint}`, err);
+  } catch (err: any) {
+    // Distinguish "model file not found" from WASM/ORT errors for clearer messages
+    const msg: string = err?.message ?? String(err);
+    if (msg.includes('404') || msg.includes('not found') || msg.includes('fetch')) {
+      console.warn(
+        '[BiRefNet] Model file not found at', modelUrl,
+        '— place birefnet-q.onnx in public/models/ or set EXPO_PUBLIC_BIREFNET_MODEL_URL',
+      );
+    } else {
+      console.warn('[BiRefNet] Failed to load model:', err);
+    }
     return null;
   }
 }
 
-/** Returns (and caches) an ORT session, or null if not configured / fails. */
-export function getSession(modelId: OnnxModelId): Promise<OnnxSession | null> {
-  if (!sessionCache.has(modelId)) {
-    sessionCache.set(modelId, loadSession(modelId));
+/** Returns (and caches) the ORT session, or null if unavailable. */
+export function getBiRefNetSession(): Promise<OnnxSession | null> {
+  if (!sessionPromise) {
+    sessionPromise = loadSession();
   }
-  return sessionCache.get(modelId)!;
+  return sessionPromise;
 }
 
-/**
- * Pre-warm configured ONNX models so first inference is fast.
- * No-op (immediate return) when no env vars are set.
- */
+/** Pre-warm the model (call during app startup to amortise first-inference delay). */
 export function warmUpOnnxModels(): void {
   if (Platform.OS !== 'web') return;
-  if (getModelUrl('birefnet')) getSession('birefnet').catch(() => {});
-  if (getModelUrl('rmbg2'))   getSession('rmbg2').catch(() => {});
+  getBiRefNetSession().catch(() => {});
 }
 
 // ─── Image helpers ────────────────────────────────────────────────────────────
 
-/** Nearest-neighbor resize RGBA → target dimensions. */
-function resizeRGBA(
+/** Bilinear resize of RGBA pixels from (sw×sh) → (tw×th). */
+export function resizeRGBABilinear(
   src: Uint8ClampedArray, sw: number, sh: number, tw: number, th: number,
 ): Uint8ClampedArray {
   const out = new Uint8ClampedArray(tw * th * 4);
   const xr = sw / tw, yr = sh / th;
   for (let ty = 0; ty < th; ty++) {
     for (let tx = 0; tx < tw; tx++) {
-      const sx = Math.min(Math.floor(tx * xr), sw - 1);
-      const sy = Math.min(Math.floor(ty * yr), sh - 1);
-      const si = (sy * sw + sx) * 4, di = (ty * tw + tx) * 4;
-      out[di] = src[si]; out[di+1] = src[si+1]; out[di+2] = src[si+2]; out[di+3] = src[si+3];
+      const gx = tx * xr, gy = ty * yr;
+      const x0 = Math.min(Math.floor(gx), sw - 1), x1 = Math.min(x0 + 1, sw - 1);
+      const y0 = Math.min(Math.floor(gy), sh - 1), y1 = Math.min(y0 + 1, sh - 1);
+      const fx = gx - x0, fy = gy - y0;
+      const di = (ty * tw + tx) * 4;
+      for (let c = 0; c < 4; c++) {
+        out[di + c] = Math.round(
+          src[(y0 * sw + x0) * 4 + c] * (1 - fx) * (1 - fy) +
+          src[(y0 * sw + x1) * 4 + c] *      fx  * (1 - fy) +
+          src[(y1 * sw + x0) * 4 + c] * (1 - fx) *      fy  +
+          src[(y1 * sw + x1) * 4 + c] *      fx  *      fy,
+        );
+      }
     }
   }
   return out;
 }
 
-/** RGBA → NCHW Float32, normalised by model-specific mean/std. */
+/** RGBA (sw×sh) → NCHW Float32, normalised by model-specific mean/std. */
 function toNCHWTensor(
   pixels: Uint8ClampedArray, w: number, h: number,
   mean: [number, number, number], std: [number, number, number],
@@ -183,7 +191,7 @@ function toNCHWTensor(
   return t;
 }
 
-/** Bilinear upsample of a flat float mask from model → original resolution. */
+/** Bilinear upsample of a flat float mask from (sw×sh) → (tw×th). */
 function upsampleAlpha(
   src: Float32Array, sw: number, sh: number, tw: number, th: number,
 ): Float32Array {
@@ -196,10 +204,10 @@ function upsampleAlpha(
       const y0 = Math.min(Math.floor(gy), sh - 1), y1 = Math.min(y0 + 1, sh - 1);
       const fx = gx - x0, fy = gy - y0;
       out[ty * tw + tx] = Math.max(0, Math.min(1,
-        src[y0 * sw + x0] * (1-fx) * (1-fy) +
-        src[y0 * sw + x1] *    fx  * (1-fy) +
-        src[y1 * sw + x0] * (1-fx) *    fy  +
-        src[y1 * sw + x1] *    fx  *    fy,
+        src[y0 * sw + x0] * (1 - fx) * (1 - fy) +
+        src[y0 * sw + x1] *      fx  * (1 - fy) +
+        src[y1 * sw + x0] * (1 - fx) *      fy  +
+        src[y1 * sw + x1] *      fx  *      fy,
       ));
     }
   }
@@ -210,65 +218,98 @@ function upsampleAlpha(
 
 export interface OnnxResult {
   /**
-   * RAW sigmoid alpha from the model (0–1, length = w*h).
-   *
-   * IMPORTANT: The caller (SegmentationService) MUST pass this through
-   * `refineAlpha()` before use. This ensures all backends — ONNX and BodyPix
-   * — receive the same SAM2 + guided-filter + edge-polish treatment.
+   * RAW alpha map from the model (0–1, length = w×h, original resolution).
+   * The caller (SegmentationService) applies refineAlpha() for post-processing.
    */
   alpha: Float32Array;
+  /** Original image width (alpha is at this resolution). */
   width: number;
+  /** Original image height (alpha is at this resolution). */
   height: number;
-  modelUsed: OnnxModelId;
 }
 
 /**
- * Runs ONNX background segmentation with BiRefNet (primary) or RMBG-2.0 (fallback).
+ * Runs BiRefNet ONNX inference on the provided image pixels.
  *
- * Returns null when neither model is configured (caller uses BodyPix).
- * On error, logs an actionable warning and returns null (no exception surfaces).
+ * @param pixels  - RGBA pixels at model resolution (ideally already 1024×1024 or
+ *                  the resize is handled internally). Length = w*h*4.
+ * @param w       - pixel buffer width
+ * @param h       - pixel buffer height
+ * @param origW   - original image width (for upsampling the alpha map back)
+ * @param origH   - original image height
+ *
+ * Returns null if the model session is unavailable (caller falls back).
  */
-export async function runOnnxSegmentation(
-  pixels: Uint8ClampedArray, w: number, h: number,
+export async function runBiRefNet(
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+  origW: number,
+  origH: number,
 ): Promise<OnnxResult | null> {
-  const order: OnnxModelId[] = ['birefnet', 'rmbg2'];
+  const session = await getBiRefNetSession();
+  if (!session) return null;
 
-  for (const modelId of order) {
-    const session = await getSession(modelId);
-    if (!session) continue;
+  try {
+    const cfg = BIREFNET_CONFIG;
+    const sz  = cfg.inputSize; // 1024
 
-    try {
-      const cfg = MODEL_CONFIGS[modelId];
-      const sz  = cfg.inputSize;
+    // Resize to model input size (bilinear for better quality than nearest-neighbor)
+    const resized = (w !== sz || h !== sz)
+      ? resizeRGBABilinear(pixels, w, h, sz, sz)
+      : pixels;
 
-      // Preprocess: resize → NCHW float tensor
-      const resized    = resizeRGBA(pixels, w, h, sz, sz);
-      const tensorData = toNCHWTensor(resized, sz, sz, cfg.mean, cfg.std);
+    const tensorData = toNCHWTensor(resized, sz, sz, cfg.mean, cfg.std);
 
-      const ort        = await import('onnxruntime-web');
-      const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, sz, sz]);
-      const inputName  = session.inputNames[0] ?? 'input';
-      const feeds: Record<string, import('onnxruntime-web').Tensor> = { [inputName]: inputTensor };
+    const ort         = await import('onnxruntime-web');
+    const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, sz, sz]);
+    const inputName   = session.inputNames[0] ?? 'input';
+    const feeds: Record<string, import('onnxruntime-web').Tensor> = { [inputName]: inputTensor };
 
-      const results    = await session.run(feeds);
-      const outputName = session.outputNames[0] ?? 'output';
-      const output     = results[outputName];
-      if (!output) { console.warn(`[OnnxBackend] No output tensor from ${modelId}`); continue; }
-
-      // Sigmoid: convert raw logits → probability (0–1)
-      const logits  = output.data as Float32Array;
-      const sigmoid = new Float32Array(logits.length);
-      for (let i = 0; i < logits.length; i++) sigmoid[i] = 1 / (1 + Math.exp(-logits[i]));
-
-      // Bilinear upsample back to source image resolution
-      const alpha = upsampleAlpha(sigmoid, sz, sz, w, h);
-      return { alpha, width: w, height: h, modelUsed: modelId };
-
-    } catch (e) {
-      console.warn(`[OnnxBackend] Inference error (${modelId}):`, e);
-      // Try next model
+    const results    = await session.run(feeds);
+    const outputName = session.outputNames[0] ?? 'output';
+    const output     = results[outputName];
+    if (!output) {
+      console.warn('[BiRefNet] No output tensor from model');
+      return null;
     }
-  }
 
-  return null; // No model succeeded — caller falls back to BodyPix
+    const rawData = output.data as Float32Array;
+
+    // Smart sigmoid detection: if all values are already in [0, 1] the ONNX
+    // graph already includes sigmoid (typical for RMBG-1.4 / RMBG-2.0 exports).
+    // If values exceed 1 or go below -0.01 they are logits and need sigmoid.
+    let needsSigmoid = cfg.outputIsProbability === false;
+    if (!needsSigmoid) {
+      // Double-check by sampling the range
+      let maxAbs = 0;
+      const step = Math.max(1, Math.floor(rawData.length / 2048));
+      for (let i = 0; i < rawData.length; i += step) {
+        const v = Math.abs(rawData[i]);
+        if (v > maxAbs) maxAbs = v;
+      }
+      needsSigmoid = maxAbs > 1.5; // logits typically reach ±5 or more
+    }
+
+    const probMap = new Float32Array(rawData.length);
+    if (needsSigmoid) {
+      for (let i = 0; i < rawData.length; i++) probMap[i] = 1 / (1 + Math.exp(-rawData[i]));
+    } else {
+      probMap.set(rawData);
+    }
+
+    // Upsample alpha from model resolution (1024×1024) to original image resolution
+    const alpha = (origW !== sz || origH !== sz)
+      ? upsampleAlpha(probMap, sz, sz, origW, origH)
+      : probMap;
+
+    return { alpha, width: origW, height: origH };
+  } catch (e) {
+    console.warn('[BiRefNet] Inference error:', e);
+    return null;
+  }
 }
+
+// ─── Legacy compat (kept so existing imports don't break) ────────────────────
+
+export { warmUpOnnxModels as default };

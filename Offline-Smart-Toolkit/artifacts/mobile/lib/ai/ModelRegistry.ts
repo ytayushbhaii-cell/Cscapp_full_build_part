@@ -1,14 +1,12 @@
 /**
- * Central AI Model Registry — tracks which models are available on-device,
- * their load status, and the currently active backend for each service.
+ * Central AI Model Registry — tracks which models are on-device, their load
+ * status, and the currently active backend for each service.
  *
- * Architecture principle: every service has a CPU fallback that works offline
- * TODAY. Dropping a model bundle (.tflite / .ort / .bin) into the assets
- * folder and updating the registry is the ONLY change needed to activate it.
+ * Architecture: BiRefNet ONNX is the primary (and only) segmentation model
+ * on web. BodyPix MobileNetV1 remains the native-only fallback until
+ * onnxruntime-react-native support is added.
  */
 import type { ModelInfo, ModelStatus, SegmentationBackend, FaceBackend, EnhancementBackend } from './types';
-
-// ─── Registry singleton ──────────────────────────────────────────────────────
 
 class AIModelRegistry {
   private models: Map<string, ModelInfo> = new Map();
@@ -18,23 +16,18 @@ class AIModelRegistry {
   }
 
   private registerDefaults() {
-    // Segmentation models (background removal, blur, etc.)
-    this.register({ id: 'bodypix',    name: 'BodyPix MobileNetV1',  backend: 'bodypix',   status: 'offline-cpu',    maxRes: 0,    sizeMB: 4   });
-    this.register({ id: 'u2net',      name: 'U2Net',                backend: 'u2net',     status: 'ai-unavailable', maxRes: 320,  sizeMB: 176 });
-    this.register({ id: 'u2net-lite', name: 'U2Net-Lite',           backend: 'u2net',     status: 'ai-unavailable', maxRes: 320,  sizeMB: 4.7 });
-    // Primary ONNX segmentation models (place .onnx file in assets/models/ to activate)
-    this.register({ id: 'birefnet',   name: 'BiRefNet',             backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 374 });
-    this.register({ id: 'birefnet-q', name: 'BiRefNet (INT8)',       backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 93  });
-    this.register({ id: 'rmbg2',      name: 'RMBG-2.0',             backend: 'rmbg2',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 176 });
-    this.register({ id: 'rmbg2-q',    name: 'RMBG-2.0 (INT8)',      backend: 'rmbg2',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
-    this.register({ id: 'isnet',      name: 'IS-Net',               backend: 'isnet',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 178 });
+    // ── Segmentation ──────────────────────────────────────────────────────────
+    // BiRefNet (bundled in public/models/birefnet-q.onnx) — web primary
+    this.register({ id: 'birefnet',   name: 'BiRefNet · ONNX',        backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
+    // BodyPix — native fallback only (not shown on web)
+    this.register({ id: 'bodypix',   name: 'BodyPix MobileNetV1',    backend: 'bodypix',   status: 'offline-cpu',    maxRes: 0,   sizeMB: 4   });
 
-    // Face detection / alignment
+    // ── Face detection / alignment ────────────────────────────────────────────
     this.register({ id: 'bodypix-face',  name: 'BodyPix Face Centroid', backend: 'bodypix-centroid', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
     this.register({ id: 'mediapipe',     name: 'MediaPipe Face Mesh',   backend: 'mediapipe',        status: 'ai-unavailable', maxRes: 192, sizeMB: 2.8 });
     this.register({ id: 'retinaface',    name: 'RetinaFace',            backend: 'retinaface',       status: 'ai-unavailable', maxRes: 640, sizeMB: 1.7 });
 
-    // Enhancement / super-resolution
+    // ── Enhancement / super-resolution ───────────────────────────────────────
     this.register({ id: 'cpu-sharpen',  name: 'CPU Unsharp Mask',    backend: 'cpu-sharpen', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
     this.register({ id: 'real-esrgan',  name: 'Real-ESRGAN x4+',     backend: 'real-esrgan', status: 'ai-unavailable', maxRes: 0,   sizeMB: 67  });
     this.register({ id: 'gfpgan',       name: 'GFPGAN v1.4',          backend: 'gfpgan',      status: 'ai-unavailable', maxRes: 512, sizeMB: 332 });
@@ -58,13 +51,11 @@ class AIModelRegistry {
     if (m) m.status = status;
   }
 
-  /** Best available segmentation backend (prefers AI model over CPU) */
+  /** Best available segmentation backend */
   bestSegmentationBackend(): SegmentationBackend {
-    for (const id of ['birefnet', 'birefnet-q', 'rmbg2', 'rmbg2-q', 'isnet', 'u2net-lite', 'u2net']) {
-      const m = this.models.get(id);
-      if (m && m.status === 'ai-cached') return m.backend as SegmentationBackend;
-    }
-    return 'bodypix'; // always-available CPU fallback
+    const birefnet = this.models.get('birefnet');
+    if (birefnet && birefnet.status === 'ai-cached') return 'birefnet';
+    return 'bodypix'; // native fallback
   }
 
   bestFaceBackend(): FaceBackend {
@@ -83,7 +74,6 @@ class AIModelRegistry {
     return 'cpu-sharpen';
   }
 
-  /** Human-readable label shown in the AI badge */
   activeSegmentationLabel(): string {
     const backend = this.bestSegmentationBackend();
     const labels: Record<SegmentationBackend, string> = {

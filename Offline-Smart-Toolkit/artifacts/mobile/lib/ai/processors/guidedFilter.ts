@@ -3,17 +3,17 @@
  *
  * The guided filter uses the original image as a structural guide to refine
  * a coarse alpha map. Unlike Gaussian blur (which ignores image content),
- * the guided filter naturally follows image edges — including individual hair
- * strands — making it the key algorithm for professional hair detail preservation.
+ * it naturally follows image edges — including individual hair strands.
  *
  * Algorithm (He et al., 2013 — O(N) implementation with box filters):
  *   For each local window:
- *     a_k = (cov_Ip / (var_I + ε))
- *     b_k = mean_p - a_k * mean_I
- *   Output q_i = mean(a_k) * I_i + mean(b_k)
+ *     a_k = cov_Ip / (var_I + ε)
+ *     b_k = mean_p − a_k · mean_I
+ *   Output: q_i = mean(a_k) · I_i + mean(b_k)
  *
- * Result: alpha values follow image gradients (preserving edges like hair)
- * while smoothing noise in uniform regions.
+ * v2 upgrade: guidedFilterTriplePass replaces the previous dual-pass.
+ * Three progressive passes at radii (20, 8, 3) capture global structure,
+ * edge sharpness, and sub-pixel hair-strand detail respectively.
  */
 
 // ─── Box filter (separable, O(N)) ────────────────────────────────────────────
@@ -57,12 +57,10 @@ function boxBlur(src: Float32Array, w: number, h: number, r: number): Float32Arr
 
 /**
  * Single-channel guided filter.
- * @param I     - guide image (grayscale Float32Array, values 0-1), length = w*h
- * @param p     - input to filter (alpha map Float32Array, values 0-1), length = w*h
- * @param w     - image width
- * @param h     - image height
- * @param r     - filter radius (controls smoothing extent, typically 8-16)
- * @param eps   - regularisation (controls edge sharpness, typically 1e-4 to 1e-2)
+ * @param I   - guide image (grayscale Float32, 0–1), length = w*h
+ * @param p   - input alpha (Float32, 0–1), length = w*h
+ * @param r   - filter radius (controls smoothing extent)
+ * @param eps - regularisation (controls edge sharpness)
  */
 function guidedFilterMono(
   I: Float32Array,
@@ -72,7 +70,7 @@ function guidedFilterMono(
   r: number,
   eps: number,
 ): Float32Array {
-  const n = w * h;
+  const n      = w * h;
   const mean_I = boxBlur(I, w, h, r);
   const mean_p = boxBlur(p, w, h, r);
 
@@ -86,7 +84,7 @@ function guidedFilterMono(
   const a = new Float32Array(n);
   const b = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const var_I = mean_II[i] - mean_I[i] * mean_I[i];
+    const var_I  = mean_II[i] - mean_I[i] * mean_I[i];
     const cov_Ip = mean_Ip[i] - mean_I[i] * mean_p[i];
     a[i] = cov_Ip / (var_I + eps);
     b[i] = mean_p[i] - a[i] * mean_I[i];
@@ -103,16 +101,9 @@ function guidedFilterMono(
 }
 
 /**
- * Color-guided filter (uses all 3 RGB channels as guide).
+ * Color-guided filter using all 3 RGB channels as guide.
  * More accurate than grayscale for colored hair / fine detail.
  * Averages the per-channel guided filter outputs.
- *
- * @param pixels - RGBA source pixels (Uint8ClampedArray), length = w*h*4
- * @param alpha  - coarse alpha (Float32Array, 0-1), length = w*h
- * @param w      - image width
- * @param h      - image height
- * @param r      - filter radius (default 12)
- * @param eps    - regularisation epsilon (default 5e-3)
  */
 export function guidedFilterRGBA(
   pixels: Uint8ClampedArray,
@@ -144,10 +135,8 @@ export function guidedFilterRGBA(
 }
 
 /**
- * Two-pass guided filter with a large radius for global structure
- * and a small radius for fine hair detail.
- *
- * Large pass handles broad transitions; small pass preserves strand-level detail.
+ * Two-pass guided filter (legacy, preserved for reference).
+ * Use guidedFilterTriplePass for better quality.
  */
 export function guidedFilterDualPass(
   pixels: Uint8ClampedArray,
@@ -156,18 +145,56 @@ export function guidedFilterDualPass(
   h: number,
 ): Float32Array {
   const n = w * h;
-  // Pass 1: large radius for coarse structure
-  const coarse = guidedFilterRGBA(pixels, alpha, w, h, 16, 1e-2);
-  // Pass 2: small radius for hair strand detail
-  const fine   = guidedFilterRGBA(pixels, coarse, w, h, 4, 1e-4);
+  const coarse = guidedFilterRGBA(pixels, alpha,  w, h, 16, 1e-2);
+  const fine   = guidedFilterRGBA(pixels, coarse, w, h,  4, 1e-4);
 
-  // Blend: use fine where alpha is in the uncertain boundary zone
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const a = alpha[i];
-    // In confident zones keep original; in boundary zone prefer the fine pass
-    const weight = 1 - Math.abs(2 * a - 1); // 0 at extremes, 1 at 0.5
+    const a      = alpha[i];
+    const weight = 1 - Math.abs(2 * a - 1); // 1 at boundary, 0 at extremes
     out[i] = Math.max(0, Math.min(1, (1 - weight) * coarse[i] + weight * fine[i]));
+  }
+  return out;
+}
+
+/**
+ * Triple-pass guided filter — professional hair-strand precision.
+ *
+ * Three progressive passes at decreasing radii:
+ *   Pass 1 (r=20, ε=1e-2): Global structure — large smooth regions
+ *   Pass 2 (r=8,  ε=5e-3): Edge sharpening — boundary refinement
+ *   Pass 3 (r=3,  ε=5e-5): Sub-pixel strands — individual hair detail
+ *
+ * Boundary-adaptive blending keeps confident interior/background regions
+ * intact while focusing refinement on the uncertain boundary zone.
+ */
+export function guidedFilterTriplePass(
+  pixels: Uint8ClampedArray,
+  alpha: Float32Array,
+  w: number,
+  h: number,
+): Float32Array {
+  const n = w * h;
+
+  // Pass 1: broad structure
+  const p1 = guidedFilterRGBA(pixels, alpha, w, h, 20, 1e-2);
+  // Pass 2: edge sharpening
+  const p2 = guidedFilterRGBA(pixels, p1,   w, h,  8, 5e-3);
+  // Pass 3: sub-pixel hair strands (very tight radius, low regularisation)
+  const p3 = guidedFilterRGBA(pixels, p2,   w, h,  3, 5e-5);
+
+  // Boundary-adaptive blend:
+  //   weight = 0 in certain fg/bg → keep original coarse alpha (no drift)
+  //   weight = 1 at boundary (a ≈ 0.5) → use fine pass for max detail
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const a      = alpha[i];
+    const weight = 4 * a * (1 - a); // peaks at a=0.5, zero at a=0 or a=1
+    // Blend p2 (structure) with p3 (fine) weighted by boundary certainty
+    const detail = (1 - weight) * p2[i] + weight * p3[i];
+    // Final: mostly structure in confident zones, detail at boundaries
+    const conf   = Math.abs(2 * a - 1); // 1 = certain, 0 = uncertain
+    out[i] = Math.max(0, Math.min(1, conf * p1[i] + (1 - conf) * detail));
   }
   return out;
 }

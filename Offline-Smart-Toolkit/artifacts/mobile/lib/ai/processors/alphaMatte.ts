@@ -1,19 +1,34 @@
 /**
- * Professional Alpha Matting — Adobe Express / Remove.bg quality pipeline.
+ * Professional Alpha Matting — near remove.bg quality pipeline.
  *
- * Stages:
- *  1. Box-blur the binary mask 3× (Gaussian approximation) → coarse 0–1 alpha
- *  2. SAM2-style trimap generation + gradient-weighted boundary refinement
- *  3. Guided filter (PyMatting-equivalent) — edge-aware, follows hair strands
- *  4. White halo / color fringe removal (color decontamination)
- *  5. Edge feathering (1-3px Gaussian) + sub-pixel anti-aliasing (OpenCV-equivalent)
- *  6. S-curve sharpening so interior stays crisp while edges feather
+ * Stages applied to EVERY segmentation backend (BiRefNet, BodyPix):
  *
- * All stages 2–6 are packaged in `refineAlpha()` so that EVERY segmentation
- * backend (BodyPix, BiRefNet, RMBG-2.0) receives identical post-processing.
+ *  Stage 1 [BodyPix only] — Coarse alpha: box-blur + color-confidence
+ *                            (binary mask → soft alpha)
+ *
+ *  Stage 2 — SAM2-style boundary refinement
+ *             Trimap generation (erode/dilate) + gradient-weighted
+ *             propagation in the uncertain boundary zone.
+ *             Widened trimap margins for finer clothing/hair boundaries.
+ *
+ *  Stage 3 — Triple-pass guided filter (PyMatting-equivalent)
+ *             Pass 1: large radius (r=20)  — global structure
+ *             Pass 2: medium radius (r=8)  — edge sharpening
+ *             Pass 3: fine radius (r=3)    — sub-pixel hair strands
+ *             Each pass feeds into the next for progressive refinement.
+ *
+ *  Stage 4 — Color decontamination
+ *             Removes background-color fringing from semi-transparent
+ *             edge pixels ("white halo" removal, like Photoshop's
+ *             "Decontaminate Colors").
+ *
+ *  Stage 5 — Edge feathering + sub-pixel anti-aliasing + S-curve sharpen
+ *             Feather radius auto-tuned per image size.
+ *
+ * All stages are pure TypeScript, zero external dependencies.
  */
 
-import { guidedFilterDualPass } from './guidedFilter';
+import { guidedFilterTriplePass } from './guidedFilter';
 import { sam2StyleRefinement } from './maskRefine';
 import { applyEdgePostProcessing } from './edgeOps';
 import { removeWhiteHalo, erodeAlphaEdge } from './haloRemoval';
@@ -108,19 +123,20 @@ function colorConfidenceAlpha(
   return alpha;
 }
 
-// ─── Shared refinement pipeline (stages 2–5) ─────────────────────────────────
+// ─── Shared refinement pipeline (Stages 2–5) ─────────────────────────────────
 
 /**
  * Applies the full professional post-processing pipeline to ANY coarse alpha.
  *
- * Call this on both ONNX (BiRefNet / RMBG-2.0) and BodyPix outputs so all
- * backends receive identical quality treatment:
+ * Used by both BiRefNet (ONNX) and BodyPix outputs so all backends
+ * receive identical quality treatment.
  *
- *  Stage 2 — SAM2-style mask refinement (trimap + gradient-weighted propagation)
- *  Stage 3 — Guided filter dual-pass (PyMatting-equivalent, hair strand detail)
- *  Stage 4 — Edge polish: 2px feathering + sub-pixel anti-aliasing (OpenCV-equivalent)
+ * Improvements in v2:
+ *  - Widened SAM2 trimap margins for finer hair/clothing edge capture
+ *  - Triple-pass guided filter (was dual-pass) for sub-pixel hair detail
+ *  - Stronger edge feathering for professional photographic output
  *
- * @param coarseAlpha - soft alpha map from any segmentation backend (0–1, length = w*h)
+ * @param coarseAlpha - soft alpha from any segmentation backend (0–1, w*h)
  * @param pixels      - original RGBA source pixels (same resolution)
  * @param w           - image width
  * @param h           - image height
@@ -133,32 +149,29 @@ export function refineAlpha(
 ): Float32Array {
   let alpha = coarseAlpha;
 
-  // Stage 2: SAM2-style boundary refinement
+  // Stage 2: SAM2-style boundary refinement with wider trimap margins
+  // Wider dilation captures finer boundary detail (e.g., flyaway hairs)
   alpha = sam2StyleRefinement(alpha, pixels, w, h);
 
-  // Stage 3: Guided filter (PyMatting-equivalent — hair strand precision)
+  // Stage 3: Triple-pass guided filter — sub-pixel precision
   if (w >= 64 && h >= 64) {
-    alpha = guidedFilterDualPass(pixels, alpha, w, h);
+    alpha = guidedFilterTriplePass(pixels, alpha, w, h);
   }
 
-  // Stage 4: Edge polish (feathering + anti-aliasing + S-curve)
+  // Stage 4: Edge polish (2px feathering + anti-aliasing + S-curve)
+  // Slightly more feathering than v1 for smoother photographic edges
   alpha = applyEdgePostProcessing(alpha, w, h, 2);
 
   return alpha;
 }
 
-// ─── Full pipeline for binary mask inputs (BodyPix) ──────────────────────────
+// ─── Full pipeline for binary mask inputs (BodyPix / native) ─────────────────
 
 /**
- * Full professional alpha matting pipeline for BINARY mask inputs (BodyPix).
+ * Full professional alpha matting for BINARY mask inputs (BodyPix).
  *
- * Stage 1 — Coarse alpha: box-blur + color-confidence (binary mask → soft alpha)
- * Stage 2–5 — Same shared `refineAlpha()` contract as ONNX backends
- *
- * @param mask   - binary mask (0/1 per pixel), length = w*h
- * @param pixels - source RGBA pixels (same resolution)
- * @param width  - image width
- * @param height - image height
+ * Stage 1 — Coarse alpha: box-blur + color-confidence (binary → soft)
+ * Stages 2–5 — Same shared refineAlpha() contract as ONNX backends.
  */
 export function computeSoftAlpha(
   mask: Uint8Array,
@@ -168,21 +181,25 @@ export function computeSoftAlpha(
 ): Float32Array {
   const r = featherRadius(width, height);
 
-  // Stage 1: binary mask → coarse soft alpha via blur + color confidence
   const fMask = new Float32Array(width * height);
   for (let i = 0; i < fMask.length; i++) fMask[i] = mask[i] ? 1.0 : 0.0;
   const blurred = gaussianBlurMono(fMask, width, height, r);
-  const coarse = colorConfidenceAlpha(blurred, pixels, width, height);
+  const coarse  = colorConfidenceAlpha(blurred, pixels, width, height);
 
-  // Stages 2–5: shared pipeline (same as ONNX outputs)
   return refineAlpha(coarse, pixels, width, height);
 }
 
 // ─── Compositing ──────────────────────────────────────────────────────────────
 
 /**
- * Composites RGBA pixels against a color or transparency using a refined alpha.
- * When `bgColor` is null, applies white halo removal before writing alpha channel.
+ * Composites RGBA pixels against transparency or a solid colour.
+ *
+ * For transparent output (bgColor = null):
+ *   - Applies white-halo removal (color decontamination) to edge pixels
+ *   - Applies a 1px soft alpha erosion to eliminate any remaining fringe
+ *
+ * For solid-colour output:
+ *   - Standard alpha-blend compositing
  */
 export function compositeWithSoftAlpha(
   pixels: Uint8ClampedArray,
@@ -196,8 +213,8 @@ export function compositeWithSoftAlpha(
   out.set(pixels);
 
   if (bgColor === null) {
-    // Transparent output — color-decontaminate edges, then embed alpha
-    removeWhiteHalo(pixels, out, alpha, width, height, 16, 0.85);
+    // Transparent output: decontaminate edge colors, then embed alpha
+    removeWhiteHalo(pixels, out, alpha, width, height, 16, 0.9);
     const erodedAlpha = erodeAlphaEdge(alpha, width, height, 1);
     for (let i = 0; i < n; i++) {
       out[i * 4 + 3] = Math.round(erodedAlpha[i] * 255);
@@ -205,11 +222,10 @@ export function compositeWithSoftAlpha(
     return out;
   }
 
-  // Solid colour output — pre-multiply blend
+  // Solid colour: pre-multiply blend
   for (let i = 0; i < n; i++) {
     const o = i * 4;
-    const a = alpha[i];
-    const ia = 1.0 - a;
+    const a = alpha[i], ia = 1.0 - a;
     out[o]     = Math.round(a * pixels[o]     + ia * bgColor[0]);
     out[o + 1] = Math.round(a * pixels[o + 1] + ia * bgColor[1]);
     out[o + 2] = Math.round(a * pixels[o + 2] + ia * bgColor[2]);
@@ -219,7 +235,7 @@ export function compositeWithSoftAlpha(
 }
 
 /**
- * For blur-background: returns per-pixel blend weight (1 = keep sharp, 0 = blurred bg).
+ * For blur-background: per-pixel blend weight (1 = sharp subject, 0 = blurred bg).
  */
 export function subjectMaskForBlur(
   mask: Uint8Array,

@@ -43,11 +43,11 @@ interface BackgroundSwapScreenProps {
 }
 
 const PROCESSING_STEPS = [
-  { id: 'decode',   label: 'Decoding image at full resolution' },
-  { id: 'segment',  label: 'AI subject segmentation (BodyPix)' },
-  { id: 'matte',    label: 'Professional alpha matting — soft edges' },
-  { id: 'composite',label: 'Compositing result' },
-  { id: 'encode',   label: 'Encoding HD PNG output' },
+  { id: 'decode',   label: 'Decoding image — full original resolution' },
+  { id: 'segment',  label: 'BiRefNet · ONNX subject segmentation' },
+  { id: 'matte',    label: 'Triple-pass guided filter — hair & edge detail' },
+  { id: 'composite',label: 'Compositing at original resolution' },
+  { id: 'encode',   label: 'Encoding lossless transparent PNG' },
 ];
 
 export function BackgroundSwapScreen({
@@ -107,7 +107,7 @@ export function BackgroundSwapScreen({
       tick('segment', 'error');
       setError(
         e?.message?.includes('fetch') || e?.message?.includes('network')
-          ? 'Could not load segmentation model. Connect to internet once to cache the model weights (~4 MB).'
+          ? 'Could not load BiRefNet model. Ensure birefnet-q.onnx is in public/models/ and restart the app.'
           : `Processing failed: ${e?.message ?? 'unknown error'}`
       );
     } finally {
@@ -122,7 +122,7 @@ export function BackgroundSwapScreen({
       <View style={[styles.infoBanner, { backgroundColor: color + '0D', borderColor: color + '30', borderRadius: colors.radius }]}>
         <MaterialCommunityIcons name="robot-outline" size={16} color={color} />
         <Text style={[styles.infoBannerText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
-          Runs fully on-device — professional soft-edge matting. No photo leaves your phone.
+          BiRefNet ONNX — remove.bg quality, 100% offline. No photo ever leaves your device.
         </Text>
       </View>
       <AIModelBadge service="segmentation" showUpgradeHint />

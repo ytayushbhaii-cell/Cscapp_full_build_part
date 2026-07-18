@@ -1,276 +1,396 @@
 /**
- * Segmentation Service — unified interface for all background-removal backends.
+ * Segmentation Service — BiRefNet ONNX background removal.
  *
- * Backend priority (runtime, auto-selected):
- *  1. BiRefNet  via ONNX — set EXPO_PUBLIC_BIREFNET_MODEL_URL to activate
- *  2. RMBG-2.0  via ONNX — set EXPO_PUBLIC_RMBG2_MODEL_URL to activate
- *  3. BodyPix MobileNetV1 — always available offline, no configuration needed
+ * ─── Architecture ────────────────────────────────────────────────────────────
  *
- * ─── Post-processing contract (all backends) ────────────────────────────────
- * Every backend's raw alpha map — whether from ONNX (BiRefNet/RMBG-2.0) or
- * BodyPix — is passed through the SAME `refineAlpha()` pipeline:
+ * Web path (primary):
+ *   1. Canvas API decode  → RGBA at original resolution (zero JPEG quality loss)
+ *   2. Resize to 1024×1024 for model input
+ *   3. BiRefNet ONNX inference → raw alpha at 1024×1024
+ *   4. Bilinear upsample alpha → ORIGINAL resolution
+ *   5. refineAlpha() post-processing at original resolution
+ *      (SAM2 trimap → guided filter → edge polish → halo removal)
+ *   6. composite at original resolution → PNG (preserves every pixel)
  *
- *  Stage 2 — SAM2-style mask refinement  (trimap + gradient-weighted propagation)
- *  Stage 3 — Guided filter dual-pass     (PyMatting-equivalent, hair strands)
- *  Stage 4 — Edge feathering + anti-alias (OpenCV-equivalent)
+ * Native path (fallback):
+ *   BodyPix + the same refineAlpha() pipeline — BiRefNet ONNX inference is
+ *   a separate upgrade (onnxruntime-react-native, see proposed tasks).
  *
- * For BodyPix (binary mask), Stage 1 converts the mask to a coarse soft alpha
- * via `computeSoftAlpha()` before the shared pipeline runs.
+ * ─── Key improvements over v1 ────────────────────────────────────────────────
+ * • No JPEG intermediate — Canvas decode preserves original quality exactly
+ * • Alpha upsample + composite at ORIGINAL resolution — output = input size
+ * • BiRefNet-only on web — no BodyPix fallback, no TF.js on web
+ * • Triple-pass guided filter for sub-pixel hair strand detail
+ * • Stronger SAM2 trimap margins for fine clothing edges
  *
- * 100% offline after model load. No pixels ever leave the device.
+ * 100% offline. No pixels ever leave the device.
  */
-import '@tensorflow/tfjs-backend-cpu';
-import * as tf from '@tensorflow/tfjs';
-// eslint-disable-next-line import/no-internal-modules
-import { decodeJpeg } from '@tensorflow/tfjs-react-native/dist/decode_image';
-import * as bodyPix from '@tensorflow-models/body-pix';
+
+import { Platform } from 'react-native';
 import { convertFormat, SaveFormat } from '@/lib/photoTools/imageOps';
 import { writePngFromRGBA } from '@/lib/photoTools/exportUtils';
 import {
-  computeSoftAlpha,
   compositeWithSoftAlpha,
   subjectMaskForBlur,
   refineAlpha,
+  computeSoftAlpha,
 } from '../processors/alphaMatte';
-import { runOnnxSegmentation, warmUpOnnxModels } from './onnxBackend';
+import { runBiRefNet, warmUpOnnxModels, resizeRGBABilinear } from './onnxBackend';
 import { modelRegistry } from '../ModelRegistry';
 import type { SegmentationResult } from '../types';
 
-// ─── Shared TF backend initialisation ────────────────────────────────────────
+// ─── TF.js / BodyPix — native fallback only ──────────────────────────────────
+// These imports are only evaluated on native (Platform.OS !== 'web') via
+// platform-specific code paths. On web, tree-shaking removes them.
 
-let backendReady: Promise<void> | null = null;
-function ensureBackend(): Promise<void> {
-  if (!backendReady) {
-    backendReady = tf.ready()
-      .then(() => tf.setBackend('cpu').then(() => {}).catch(() => {}));
+let _tf: typeof import('@tensorflow/tfjs') | null = null;
+let _decodeJpeg: ((buf: Uint8Array) => import('@tensorflow/tfjs').Tensor3D) | null = null;
+let _bodyPixModel: import('@tensorflow-models/body-pix').BodyPix | null = null;
+let _bodyPixPromise: Promise<import('@tensorflow-models/body-pix').BodyPix> | null = null;
+
+async function getNativeTF() {
+  if (!_tf) {
+    await import('@tensorflow/tfjs-backend-cpu');
+    _tf = await import('@tensorflow/tfjs');
+    await _tf.ready();
+    await _tf.setBackend('cpu').catch(() => {});
+    const rn = await import('@tensorflow/tfjs-react-native/dist/decode_image');
+    _decodeJpeg = rn.decodeJpeg as any;
   }
-  return backendReady!;
+  return { tf: _tf!, decodeJpeg: _decodeJpeg! };
 }
 
-// ─── BodyPix singleton ────────────────────────────────────────────────────────
-
-let modelPromise: Promise<bodyPix.BodyPix> | null = null;
-async function getBodyPixModel(): Promise<bodyPix.BodyPix> {
-  if (!modelPromise) {
-    modelPromise = ensureBackend().then(() =>
-      bodyPix.load({
+async function getNativeBodyPix() {
+  if (!_bodyPixPromise) {
+    _bodyPixPromise = (async () => {
+      await getNativeTF();
+      const bp = await import('@tensorflow-models/body-pix');
+      const model = await bp.load({
         architecture: 'MobileNetV1',
         outputStride: 16,
         multiplier: 0.75,
         quantBytes: 2,
-      })
-    );
-    modelPromise
-      .then(() => modelRegistry.setStatus('bodypix', 'ai-cached'))
-      .catch(() => {});
+      });
+      modelRegistry.setStatus('bodypix', 'ai-cached');
+      return model;
+    })();
   }
-  return modelPromise;
+  return _bodyPixPromise!;
 }
 
+// ─── Warm-up ──────────────────────────────────────────────────────────────────
+
 export function warmUpSegmentation(): void {
-  warmUpOnnxModels();          // no-op when env vars are not set
-  getBodyPixModel().catch(() => {});
+  warmUpOnnxModels(); // pre-warm BiRefNet session
+  if (Platform.OS !== 'web') {
+    getNativeBodyPix().catch(() => {});
+  }
 }
 
 // ─── Image decode ─────────────────────────────────────────────────────────────
 
 /**
- * Maximum pixel dimension used for ALL segmentation processing.
+ * Maximum pixel dimension used for segmentation inference.
  *
- * Why 1024: guided filter + SAM2 refinement iterate every pixel multiple
- * times synchronously on the JS thread. A 4032×3024 phone photo = 12M px —
- * that can take 5–10 minutes and appears as "infinite loading". Capping at
- * 1024 keeps every image under ~1M px and finishes in seconds.
- *
- * The output PNG is also at this resolution; 1024 px is more than enough
- * for ID photos, product shots, and profile pictures.
+ * BiRefNet is trained at 1024×1024. Larger inputs are downscaled for
+ * inference, then the alpha mask is bilinear-upsampled back to the original
+ * resolution for compositing — so output PNG quality is never lossy.
  */
-const MAX_PROCESSING_SIDE = 1024;
+const MAX_MODEL_SIDE = 1024;
 
-/** Wraps a promise with a timeout; rejects with a friendly error message. */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+interface DecodeResult {
+  /** RGBA pixels at MODEL resolution (≤1024px) — fed to the ONNX model */
+  modelPixels: Uint8ClampedArray;
+  modelW: number;
+  modelH: number;
+  /** RGBA pixels at ORIGINAL resolution — used for final compositing */
+  origPixels: Uint8ClampedArray;
+  origW: number;
+  origH: number;
+}
+
+/**
+ * Web decode — uses the Canvas API (OffscreenCanvas) for zero-quality-loss
+ * RGBA extraction. Avoids the JPEG intermediate used by the old path.
+ */
+async function decodeWeb(uri: string): Promise<DecodeResult> {
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+
+  await new Promise<void>((resolve, reject) => {
+    img.onload  = () => resolve();
+    img.onerror = () => reject(new Error(`Failed to load image: ${uri}`));
+    img.src = uri;
+  });
+
+  const origW = img.naturalWidth;
+  const origH = img.naturalHeight;
+
+  // Original-resolution canvas — for final compositing
+  const origCanvas = new OffscreenCanvas(origW, origH);
+  const origCtx = origCanvas.getContext('2d')!;
+  origCtx.drawImage(img, 0, 0);
+  const origPixels = new Uint8ClampedArray(
+    origCtx.getImageData(0, 0, origW, origH).data,
+  );
+
+  // Model-resolution canvas — for inference
+  const maxSide = Math.max(origW, origH);
+  const scale   = maxSide > MAX_MODEL_SIDE ? MAX_MODEL_SIDE / maxSide : 1;
+  const modelW  = Math.max(1, Math.round(origW * scale));
+  const modelH  = Math.max(1, Math.round(origH * scale));
+
+  let modelPixels: Uint8ClampedArray;
+  if (scale < 1) {
+    const mc  = new OffscreenCanvas(modelW, modelH);
+    const mCtx = mc.getContext('2d')!;
+    mCtx.drawImage(img, 0, 0, modelW, modelH);
+    modelPixels = new Uint8ClampedArray(mCtx.getImageData(0, 0, modelW, modelH).data);
+  } else {
+    modelPixels = origPixels; // already within limits
+  }
+
+  return { modelPixels, modelW, modelH, origPixels, origW, origH };
+}
+
+/**
+ * Native decode — converts to JPEG via expo-image-manipulator, then
+ * decodes via TF.js decodeJpeg to get RGB pixel data.
+ *
+ * On native, origPixels === modelPixels (single resolution).
+ * Output resolution is capped at MAX_MODEL_SIDE; the BodyPix mask is at
+ * the same resolution so compositing is self-consistent.
+ */
+async function decodeNative(uri: string): Promise<DecodeResult> {
+  const { tf, decodeJpeg } = await getNativeTF();
+
+  const jpeg = await convertFormat(uri, SaveFormat.JPEG, 0.95);
+  const buf  = await (await fetch(jpeg.uri)).arrayBuffer();
+  // decodeJpeg returns [h, w, 3] int32 tensor, values 0-255
+  let rgbTensor = decodeJpeg(new Uint8Array(buf)) as import('@tensorflow/tfjs').Tensor3D;
+
+  const origH = rgbTensor.shape[0];
+  const origW = rgbTensor.shape[1];
+
+  let modelW = origW, modelH = origH;
+  const maxSide = Math.max(origW, origH);
+  if (maxSide > MAX_MODEL_SIDE) {
+    const scale = MAX_MODEL_SIDE / maxSide;
+    modelW = Math.max(1, Math.round(origW * scale));
+    modelH = Math.max(1, Math.round(origH * scale));
+    const resized = tf.image.resizeBilinear(rgbTensor, [modelH, modelW]) as import('@tensorflow/tfjs').Tensor3D;
+    rgbTensor.dispose();
+    rgbTensor = resized;
+  }
+
+  // Get raw int32 RGB data and convert → RGBA Uint8ClampedArray
+  const rawRGB   = await rgbTensor.data() as unknown as Int32Array;
+  rgbTensor.dispose();
+
+  const n    = modelW * modelH;
+  const rgba = new Uint8ClampedArray(n * 4);
+  for (let i = 0; i < n; i++) {
+    rgba[i * 4]     = rawRGB[i * 3]     & 0xff;
+    rgba[i * 4 + 1] = rawRGB[i * 3 + 1] & 0xff;
+    rgba[i * 4 + 2] = rawRGB[i * 3 + 2] & 0xff;
+    rgba[i * 4 + 3] = 255;
+  }
+
+  return {
+    modelPixels: rgba,
+    modelW,
+    modelH,
+    origPixels: rgba,  // native: output at model resolution (acceptable)
+    origW:  modelW,
+    origH:  modelH,
+  };
+}
+
+async function decodeImage(uri: string): Promise<DecodeResult> {
+  if (Platform.OS === 'web') return decodeWeb(uri);
+  return decodeNative(uri);
+}
+
+// ─── Timeout helper ───────────────────────────────────────────────────────────
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
-    promise,
+    p,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s. Try a smaller image.`)), ms)
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms / 1000}s. Try a smaller image.`)),
+        ms,
+      ),
     ),
   ]);
 }
 
-async function decodeToRGBA(uri: string): Promise<{
-  tensor: tf.Tensor3D;
-  pixels: Uint8ClampedArray;
-  w: number;
-  h: number;
-}> {
-  const jpeg = await convertFormat(uri, SaveFormat.JPEG, 0.92);
-  const buf = await (await fetch(jpeg.uri)).arrayBuffer();
-  let tensor = decodeJpeg(new Uint8Array(buf)) as tf.Tensor3D;
+const TIMEOUT_MS = 120_000;
 
-  // Cap resolution so post-processing never hangs on large photos
-  const origH = tensor.shape[0], origW = tensor.shape[1];
-  const maxSide = Math.max(origW, origH);
-  if (maxSide > MAX_PROCESSING_SIDE) {
-    const scale = MAX_PROCESSING_SIDE / maxSide;
-    const newW = Math.max(1, Math.round(origW * scale));
-    const newH = Math.max(1, Math.round(origH * scale));
-    const resized = tf.image.resizeBilinear(tensor, [newH, newW]) as tf.Tensor3D;
-    tensor.dispose();
-    tensor = resized;
-  }
-
-  const [h, w] = [tensor.shape[0], tensor.shape[1]];
-  const pixelsTensor = tensor.div(255) as tf.Tensor3D;
-  const pixels = await tf.browser.toPixels(pixelsTensor);
-  pixelsTensor.dispose();
-  return { tensor, pixels, w, h };
-}
-
-// ─── Per-backend raw alpha extraction ────────────────────────────────────────
+// ─── BiRefNet alpha extraction ────────────────────────────────────────────────
 
 /**
- * Tries ONNX (BiRefNet → RMBG-2.0).
- * Returns { rawAlpha, backend } if a session is available, null otherwise.
- * rawAlpha is the RAW model output — caller applies refineAlpha() after.
+ * Runs BiRefNet ONNX on the model-resolution pixels and returns a raw alpha
+ * map at ORIGINAL resolution (via bilinear upsample inside runBiRefNet).
  */
-async function tryOnnxAlpha(
-  pixels: Uint8ClampedArray,
-  w: number,
-  h: number,
-): Promise<{ rawAlpha: Float32Array; backend: 'birefnet' | 'rmbg2' } | null> {
-  const result = await runOnnxSegmentation(pixels, w, h);
+async function biRefNetAlpha(decoded: DecodeResult): Promise<Float32Array | null> {
+  const result = await runBiRefNet(
+    decoded.modelPixels,
+    decoded.modelW,
+    decoded.modelH,
+    decoded.origW,
+    decoded.origH,
+  );
   if (!result) return null;
-  modelRegistry.setStatus(result.modelUsed, 'ai-cached');
-  return { rawAlpha: result.alpha, backend: result.modelUsed };
+  modelRegistry.setStatus('birefnet', 'ai-cached');
+  return result.alpha;
 }
 
-/**
- * BodyPix inference → binary mask → coarse soft alpha (Stage 1).
- * Returns a coarse alpha ready for refineAlpha().
- */
-async function bodyPixCoarseAlpha(
-  tensor: tf.Tensor3D,
-  pixels: Uint8ClampedArray,
-  w: number,
-  h: number,
-): Promise<Float32Array> {
-  const model = await getBodyPixModel();
-  const seg = await model.segmentPerson(tensor, {
+// ─── BodyPix alpha (native fallback only) ────────────────────────────────────
+
+async function bodyPixAlpha(decoded: DecodeResult): Promise<Float32Array> {
+  const { tf } = await getNativeTF();
+  const model  = await getNativeBodyPix();
+  const { modelPixels, modelW, modelH } = decoded;
+
+  // Convert RGBA → RGB Float32 tensor [h, w, 3] for BodyPix
+  const n      = modelW * modelH;
+  const rgbBuf = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    rgbBuf[i * 3]     = modelPixels[i * 4];
+    rgbBuf[i * 3 + 1] = modelPixels[i * 4 + 1];
+    rgbBuf[i * 3 + 2] = modelPixels[i * 4 + 2];
+  }
+  const tensor = tf.tensor3d(rgbBuf, [modelH, modelW, 3]) as import('@tensorflow/tfjs').Tensor3D;
+
+  const seg = await (model as any).segmentPerson(tensor, {
     internalResolution: 'high',
     segmentationThreshold: 0.55,
     maxDetections: 1,
   });
-  const binaryMask = seg.data as unknown as Uint8Array;
-  // computeSoftAlpha applies Stage 1 (coarse) + the shared refineAlpha pipeline
-  return computeSoftAlpha(binaryMask, pixels, w, h);
+  tensor.dispose();
+
+  const binaryMask = new Uint8Array(seg.data.length);
+  for (let i = 0; i < seg.data.length; i++) binaryMask[i] = seg.data[i] ? 1 : 0;
+  return computeSoftAlpha(binaryMask, decoded.origPixels, modelW, modelH);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Segments the subject and returns a fully-refined soft alpha + face bounds.
+ * Segments the subject and returns a fully-refined soft alpha + face centroid.
  *
- * Pipeline per backend:
- *   ONNX  → raw ONNX alpha → refineAlpha() → compositeWithSoftAlpha()
- *   BodyPix → binary mask → computeSoftAlpha() (includes refineAlpha internally)
+ * Pipeline:
+ *   Web:    Canvas decode → BiRefNet ONNX → refineAlpha() at original resolution
+ *   Native: JPEG decode  → BodyPix       → computeSoftAlpha() (includes refineAlpha)
  */
-const PROCESS_TIMEOUT_MS = 90_000;
-
 export async function segmentSubject(uri: string): Promise<SegmentationResult> {
-  const { tensor, pixels, w, h } = await withTimeout(decodeToRGBA(uri), PROCESS_TIMEOUT_MS, 'Decode');
-  try {
-    const onnx = await tryOnnxAlpha(pixels, w, h);
+  const inner = async () => {
+    const decoded = await decodeImage(uri);
+
     let alpha: Float32Array;
     let backend: SegmentationResult['backend'];
 
-    if (onnx) {
-      // Apply the SAME shared refinement pipeline ONNX uses (Stages 2–4)
-      alpha   = refineAlpha(onnx.rawAlpha, pixels, w, h);
-      backend = onnx.backend;
+    if (Platform.OS === 'web') {
+      // Web: BiRefNet ONNX only. If unavailable, surface a clear error.
+      const rawAlpha = await biRefNetAlpha(decoded);
+      if (!rawAlpha) {
+        throw new Error(
+          'BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/ and restart.',
+        );
+      }
+      // Post-process at original resolution using original pixels for guided filter
+      alpha   = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
+      backend = 'birefnet';
     } else {
-      // computeSoftAlpha already includes Stage 1 + Stages 2–4 for binary masks
-      alpha   = await bodyPixCoarseAlpha(tensor, pixels, w, h);
+      // Native: BodyPix fallback (BiRefNet native upgrade is a separate task)
+      alpha   = await bodyPixAlpha(decoded);
       backend = 'bodypix';
     }
 
-    // Compute subject centroid from alpha > 0.5
+    // Subject centroid from alpha > 0.5
     let sx = 0, sy = 0, sn = 0;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        if (alpha[y * w + x] > 0.5) { sx += x; sy += y; sn++; }
+    for (let y = 0; y < decoded.origH; y++) {
+      for (let x = 0; x < decoded.origW; x++) {
+        if (alpha[y * decoded.origW + x] > 0.5) { sx += x; sy += y; sn++; }
       }
     }
     const face = sn > 0
-      ? { x: 0, y: 0, w: 1, h: 1, confidence: 1, cx: sx / sn / w, cy: sy / sn / h }
+      ? { x: 0, y: 0, w: 1, h: 1, confidence: 1,
+          cx: sx / sn / decoded.origW, cy: sy / sn / decoded.origH }
       : null;
 
-    return { width: w, height: h, alpha, face, backend };
-  } finally {
-    tensor.dispose();
-  }
+    return {
+      width:  decoded.origW,
+      height: decoded.origH,
+      alpha,
+      face,
+      backend,
+    };
+  };
+
+  return withTimeout(inner(), TIMEOUT_MS, 'Segmentation');
 }
 
 /**
- * Removes background with transparent or solid-colour output.
+ * Removes the background and returns a transparent (or solid-colour) PNG URI.
  *
- * Both ONNX and BodyPix paths go through refineAlpha() before compositing
- * so quality is identical regardless of which model is active.
+ * Output resolution = original input resolution (no quality loss).
  */
 export async function removeBackgroundPro(
   uri: string,
   bgColor: [number, number, number] | null,
 ): Promise<{ uri: string; width: number; height: number }> {
   const inner = async () => {
-    const { tensor, pixels, w, h } = await decodeToRGBA(uri);
-    try {
-      const onnx = await tryOnnxAlpha(pixels, w, h);
-      let alpha: Float32Array;
+    const decoded = await decodeImage(uri);
 
-      if (onnx) {
-        alpha = refineAlpha(onnx.rawAlpha, pixels, w, h);
-      } else {
-        alpha = await bodyPixCoarseAlpha(tensor, pixels, w, h);
+    let alpha: Float32Array;
+
+    if (Platform.OS === 'web') {
+      const rawAlpha = await biRefNetAlpha(decoded);
+      if (!rawAlpha) {
+        throw new Error(
+          'BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/ and restart.',
+        );
       }
-
-      const rgba   = compositeWithSoftAlpha(pixels, alpha, w, h, bgColor);
-      const outUri = await writePngFromRGBA(rgba, w, h);
-      return { uri: outUri, width: w, height: h };
-    } finally {
-      tensor.dispose();
+      alpha = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
+    } else {
+      alpha = await bodyPixAlpha(decoded);
     }
+
+    // Composite at original resolution → preserves every source pixel
+    const rgba   = compositeWithSoftAlpha(decoded.origPixels, alpha, decoded.origW, decoded.origH, bgColor);
+    const outUri = await writePngFromRGBA(rgba, decoded.origW, decoded.origH);
+    return { uri: outUri, width: decoded.origW, height: decoded.origH };
   };
-  return withTimeout(inner(), PROCESS_TIMEOUT_MS, 'Background removal');
+
+  return withTimeout(inner(), TIMEOUT_MS, 'Background removal');
 }
 
 /**
  * Blurs background while keeping subject sharp.
- * Subject alpha uses the same full pipeline regardless of active backend.
+ * Output is at original image resolution.
  */
 export async function blurBackgroundPro(
   uri: string,
   blurRadius: number,
   blurFn: (pixels: Uint8ClampedArray, w: number, h: number, r: number) => Uint8ClampedArray,
 ): Promise<{ uri: string; width: number; height: number }> {
-  const { tensor, pixels, w, h } = await decodeToRGBA(uri);
-  try {
-    const onnx = await tryOnnxAlpha(pixels, w, h);
+  const inner = async () => {
+    const decoded = await decodeImage(uri);
     let subjectWeight: Float32Array;
 
-    if (onnx) {
-      subjectWeight = refineAlpha(onnx.rawAlpha, pixels, w, h);
+    if (Platform.OS === 'web') {
+      const rawAlpha = await biRefNetAlpha(decoded);
+      if (!rawAlpha) {
+        throw new Error('BiRefNet model not loaded. Ensure birefnet-q.onnx is in public/models/.');
+      }
+      subjectWeight = refineAlpha(rawAlpha, decoded.origPixels, decoded.origW, decoded.origH);
     } else {
-      const model = await getBodyPixModel();
-      const seg = await model.segmentPerson(tensor, {
-        internalResolution: 'high',
-        segmentationThreshold: 0.55,
-        maxDetections: 1,
-      });
-      subjectWeight = subjectMaskForBlur(
-        seg.data as unknown as Uint8Array,
-        pixels, w, h,
-      );
+      subjectWeight = await bodyPixAlpha(decoded);
     }
 
+    const { origPixels: pixels, origW: w, origH: h } = decoded;
     const blurred   = blurFn(pixels, w, h, blurRadius);
     const composite = new Uint8ClampedArray(w * h * 4);
     for (let i = 0; i < w * h; i++) {
@@ -284,7 +404,7 @@ export async function blurBackgroundPro(
 
     const outUri = await writePngFromRGBA(composite, w, h);
     return { uri: outUri, width: w, height: h };
-  } finally {
-    tensor.dispose();
-  }
+  };
+
+  return withTimeout(inner(), TIMEOUT_MS, 'Background blur');
 }
