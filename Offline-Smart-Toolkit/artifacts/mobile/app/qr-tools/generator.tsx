@@ -15,7 +15,6 @@ import { useApp } from '@/context/AppContext';
 import { buildQRValue, describeQRValue, type QRType } from '@/lib/features/qr/qrService';
 import { addHistoryEntry } from '@/lib/features/toolsHistory/db';
 import { exportFile } from '@/lib/photoTools/exportUtils';
-import * as FileSystem from 'expo-file-system';
 
 const QR_COLOR = '#8B5CF6';
 
@@ -48,6 +47,37 @@ export default function QRGeneratorScreen() {
   const [qrSize, setQrSize] = useState(240);
   const [exporting, setExporting] = useState(false);
   const viewShotRef = useRef<ViewShot>(null);
+  const qrSvgRef = useRef<any>(null);
+
+  /** Capture QR as PNG data-URL (web: SVG→Canvas; native: ViewShot) */
+  const captureQR = async (): Promise<string> => {
+    if (Platform.OS === 'web') {
+      // react-native-qrcode-svg exposes the SVG DOM element via getRef on web
+      const svgEl = qrSvgRef.current;
+      if (!svgEl) throw new Error('SVG ref not available');
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const padded = qrSize + 40;
+      const canvas = document.createElement('canvas');
+      canvas.width = padded; canvas.height = padded;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, padded, padded);
+      return new Promise<string>((resolve, reject) => {
+        const img = new Image();
+        const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        img.onload = () => {
+          ctx.drawImage(img, 20, 20, qrSize, qrSize);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG render failed')); };
+        img.src = url;
+      });
+    }
+    // Native: use ViewShot
+    return (viewShotRef.current as any).capture();
+  };
 
   const isFav = favoriteIds.includes('qr-generator');
   const qrValue = buildQRValue(qrType, formData);
@@ -58,10 +88,9 @@ export default function QRGeneratorScreen() {
 
   const handleExport = async () => {
     if (!hasValue) { Alert.alert('Empty QR', 'Please enter some content first.'); return; }
-    if (!viewShotRef.current) return;
     setExporting(true);
     try {
-      const uri: string = await (viewShotRef.current as any).capture();
+      const uri = await captureQR();
       const fileName = `QR-${qrType}-${Date.now()}.png`;
       await addHistoryEntry({
         category: 'qr',
@@ -73,6 +102,39 @@ export default function QRGeneratorScreen() {
       await exportFile(uri, fileName);
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!hasValue) { Alert.alert('Empty QR', 'Please enter some content first.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureQR();
+      const fileName = `QR-${qrType}-${Date.now()}.png`;
+      if (Platform.OS === 'web') {
+        // Try Web Share API with file, fallback to download
+        try {
+          const res = await fetch(uri);
+          const blob = await res.blob();
+          const file = new File([blob], fileName, { type: 'image/png' });
+          if ((navigator as any).canShare?.({ files: [file] })) {
+            await (navigator as any).share({ files: [file], title: 'QR Code' });
+            return;
+          }
+        } catch { /* fall through to download */ }
+        await exportFile(uri, fileName);
+      } else {
+        const Sharing = await import('expo-sharing');
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share QR Code' });
+        } else {
+          await exportFile(uri, fileName);
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Share failed', e?.message ?? 'Unknown error');
     } finally {
       setExporting(false);
     }
@@ -192,6 +254,7 @@ export default function QRGeneratorScreen() {
                   size={qrSize}
                   color={fgColor}
                   backgroundColor={bgColor}
+                  getRef={(ref) => { qrSvgRef.current = ref; }}
                 />
               </ViewShot>
             </View>
@@ -225,7 +288,7 @@ export default function QRGeneratorScreen() {
 
         <TouchableOpacity
           style={[styles.shareBtn, { borderColor: QR_COLOR, borderRadius: colors.radius, opacity: hasValue ? 1 : 0.45 }]}
-          onPress={handleExport}
+          onPress={handleShare}
           disabled={!hasValue || exporting}
           activeOpacity={0.85}
         >

@@ -17,7 +17,7 @@ const NAV_ITEMS = [
   { label: 'Dashboard', icon: 'view-dashboard-outline', route: '/dashboard' },
   { label: 'Tools', icon: 'tools', route: '/tools' },
   { label: 'Photo Tools', icon: 'image-multiple', route: '/photo-tools' },
-  { label: 'Recent Files', icon: 'history', route: '/recent' },
+ 
   { label: 'Favorites', icon: 'heart-outline', route: '/favorites' },
   { label: 'Settings', icon: 'cog-outline', route: '/settings' },
 ] as const;
