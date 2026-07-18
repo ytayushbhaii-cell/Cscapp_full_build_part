@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PHOTO_TOOLS } from '@/lib/photoTools/tools';
+import { ALL_DOC_TOOLS } from '@/lib/features/documents/tools';
 
 export interface RecentFile {
   id: string;
@@ -66,27 +67,40 @@ const PHOTO_TOOL_ENTRIES: Tool[] = PHOTO_TOOLS.map((t) => ({
   route: t.route,
 }));
 
+const DOC_TOOL_ENTRIES: Tool[] = ALL_DOC_TOOLS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: t.category === 'aadhaar' ? 'Aadhaar Tools'
+    : t.category === 'pan' ? 'PAN Tools'
+    : t.category === 'voter' ? 'Voter ID Tools'
+    : t.category === 'driving-license' ? 'Driving License Tools'
+    : t.category === 'passport' ? 'Passport Tools'
+    : 'PDF Tools',
+  iconName: t.iconName,
+  color: t.color,
+  description: t.description,
+  route: t.route,
+}));
+
 export const ALL_TOOLS: Tool[] = [
   ...PHOTO_TOOL_ENTRIES,
-  { id: 'pdf-merge', name: 'PDF Merge', category: 'PDF Tools', iconName: 'file-pdf-box', color: '#EF4444', description: 'Merge multiple PDF files into one' },
-  { id: 'pdf-compress', name: 'PDF Compress', category: 'PDF Tools', iconName: 'file-arrow-up-down-outline', color: '#F59E0B', description: 'Compress PDF files to reduce size' },
-  { id: 'pdf-split', name: 'PDF Split', category: 'PDF Tools', iconName: 'scissors-cutting', color: '#F97316', description: 'Split a PDF into multiple files' },
+  ...DOC_TOOL_ENTRIES,
   { id: 'qr-generator', name: 'QR Generator', category: 'QR & Barcode', iconName: 'qrcode', color: '#8B5CF6', description: 'Generate QR codes for any data' },
   { id: 'barcode-gen', name: 'Barcode Generator', category: 'QR & Barcode', iconName: 'barcode', color: '#7C3AED', description: 'Generate barcodes for products' },
   { id: 'signature', name: 'Signature Tool', category: 'Signature Tools', iconName: 'draw', color: '#EC4899', description: 'Create and manage digital signatures' },
-  { id: 'aadhaar-tools', name: 'Aadhaar Tools', category: 'Aadhaar Tools', iconName: 'card-account-details-outline', color: '#F97316', description: 'Aadhaar related document services' },
-  { id: 'pan-tools', name: 'PAN Tools', category: 'PAN Tools', iconName: 'credit-card-outline', color: '#06B6D4', description: 'PAN card related document services' },
 ];
 
 export const ALL_CATEGORIES: ToolCategory[] = [
-  { id: 'photo', name: 'Photo Tools', iconName: 'image-multiple', color: '#10B981', gradient: ['#10B981', '#059669'], count: 16 },
-  { id: 'aadhaar', name: 'Aadhaar Tools', iconName: 'card-account-details-outline', color: '#F97316', gradient: ['#F97316', '#EA580C'], count: 3 },
-  { id: 'pan', name: 'PAN Tools', iconName: 'credit-card-outline', color: '#06B6D4', gradient: ['#06B6D4', '#0891B2'], count: 3 },
-  { id: 'pdf', name: 'PDF Tools', iconName: 'file-pdf-box', color: '#EF4444', gradient: ['#EF4444', '#DC2626'], count: 6 },
-  { id: 'qr', name: 'QR & Barcode', iconName: 'qrcode-scan', color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: 4 },
-  { id: 'signature', name: 'Signature Tools', iconName: 'draw', color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: 2 },
-  { id: 'print', name: 'Print Tools', iconName: 'printer', color: '#6366F1', gradient: ['#6366F1', '#4F46E5'], count: 3 },
-  { id: 'utilities', name: 'Utilities', iconName: 'tools', color: '#64748B', gradient: ['#64748B', '#475569'], count: 7 },
+  { id: 'photo',    name: 'Photo Tools',           iconName: 'image-multiple',               color: '#10B981', gradient: ['#10B981', '#059669'], count: 24 },
+  { id: 'aadhaar',  name: 'Aadhaar Tools',          iconName: 'card-account-details-outline', color: '#F97316', gradient: ['#F97316', '#EA580C'], count: 11 },
+  { id: 'pan',      name: 'PAN Tools',              iconName: 'credit-card-outline',           color: '#06B6D4', gradient: ['#06B6D4', '#0891B2'], count: 5  },
+  { id: 'voter',    name: 'Voter ID Tools',         iconName: 'vote-outline',                  color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: 4  },
+  { id: 'driving',  name: 'Driving License',        iconName: 'car-outline',                   color: '#10B981', gradient: ['#10B981', '#059669'], count: 4  },
+  { id: 'passport', name: 'Passport Tools',         iconName: 'passport',                      color: '#3B82F6', gradient: ['#3B82F6', '#2563EB'], count: 4  },
+  { id: 'pdf',      name: 'PDF Tools',              iconName: 'file-pdf-box',                  color: '#EF4444', gradient: ['#EF4444', '#DC2626'], count: 15 },
+  { id: 'qr',       name: 'QR & Barcode',           iconName: 'qrcode-scan',                   color: '#8B5CF6', gradient: ['#8B5CF6', '#7C3AED'], count: 4  },
+  { id: 'signature',name: 'Signature Tools',        iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: 2  },
+  { id: 'utilities',name: 'Utilities',              iconName: 'tools',                         color: '#64748B', gradient: ['#64748B', '#475569'], count: 7  },
 ];
 
 const AppContext = createContext<AppContextType>({

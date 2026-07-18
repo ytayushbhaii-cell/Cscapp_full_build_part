@@ -17,10 +17,16 @@ import { useDrawer } from '@/context/DrawerContext';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/context/ThemeContext';
 
-// Categories with a real destination screen; every other category stays
-// inert (matches the rest of the app until those modules are built).
+// Categories with real destination screens
 const CATEGORY_ROUTES: Record<string, string> = {
-  photo: '/photo-tools',
+  photo:      '/photo-tools',
+  aadhaar:    '/document-tools',
+  pan:        '/document-tools',
+  pdf:        '/document-tools',
+  documents:  '/document-tools',
+  voter:      '/document-tools',
+  passport:   '/document-tools',
+  driving:    '/document-tools',
 };
 
 export default function ToolsScreen() {
