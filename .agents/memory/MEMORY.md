@@ -7,3 +7,6 @@
 - [Segmentation resolution cap](segmentation-resolution-cap.md) — Must resize images to ≤1024px before guided-filter/SAM2 pipeline; full-res causes infinite loading on large photos.
 - [onnxruntime-web Metro CJS fix](onnxruntime-web-metro-cjs-fix.md) — Metro rejects ORT ESM bundle (webpack-ignore dynamic import); redirect onnxruntime-web → dist/ort.min.js via resolveRequest.
 - [ORT 1.27 JSEP crash fix](ort-jsep-crash-fix.md) — use ort.wasm.min.js not ort.min.js; full bundle always fetches .jsep.mjs at init, crashing when file is absent.
+- [Platform shadow cross-compat](platform-shadow.md) — shadow* props deprecated on web; wrap all shadow* in Platform.select({web:{boxShadow:...}as any, default:{shadowColor:...}}) inside StyleSheet.create.
+- [ortLoader platform extension TS stub](ortloader-ts-stub.md) — ortLoader.web.ts / .native.ts exist but tsc can't resolve platform extensions; create ortLoader.ts base stub with same signature.
+- [expo-file-system dynamic import typing](expo-fs-dynamic-import.md) — dynamic `await import('expo-file-system')` returns module namespace; cast as any to access cacheDirectory/writeAsStringAsync.

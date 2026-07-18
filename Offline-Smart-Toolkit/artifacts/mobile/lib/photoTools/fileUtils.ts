@@ -27,10 +27,11 @@ export async function batchRenameAndZip(files: { uri: string; name: string }[]):
     return URL.createObjectURL(blob);
   }
 
-  const { FileSystem } = await import('expo-file-system');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const EFS = (await import('expo-file-system')) as any;
   const base64 = await zip.generateAsync({ type: 'base64' });
-  const dir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory;
+  const dir = EFS.cacheDirectory ?? EFS.documentDirectory;
   const path = `${dir}batch-rename-${Date.now()}.zip`;
-  await FileSystem.writeAsStringAsync(path, base64, { encoding: 'base64' as any });
+  await EFS.writeAsStringAsync(path, base64, { encoding: 'base64' });
   return path;
 }

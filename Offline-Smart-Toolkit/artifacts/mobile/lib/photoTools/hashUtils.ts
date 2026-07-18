@@ -23,7 +23,7 @@ export async function computeImageHash(uri: string): Promise<string> {
   });
 
   // 2. Decode to raw RGBA pixels
-  const { data, width, height } = await decodeToRGBA(small.uri);
+  const { pixels: data, width, height } = await decodeToRGBA(small.uri);
 
   // 3. Convert to greyscale and compute dHash
   let bits = '';

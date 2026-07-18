@@ -10,14 +10,14 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.csc.smarttoolkit"
+      "bundleIdentifier": "com.cscsmarttoolkit.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#1D4ED8"
       },
-      "package": "com.csc.smarttoolkit"
+      "package": "com.cscsmarttoolkit.app"
     },
     "web": {
       "bundler": "metro",

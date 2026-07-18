@@ -392,7 +392,7 @@ const styles = StyleSheet.create({
   zoomBtn:         { width: 28, height: 28, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   zoomLabel:       { color: '#fff', fontSize: 12, minWidth: 36, textAlign: 'center' },
   previewScrollInner: { alignItems: 'center', justifyContent: 'center', minHeight: 280 },
-  paperSheet:      { backgroundColor: '#fff', borderColor: '#CBD5E1', borderWidth: 1, position: 'relative', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  paperSheet:      { backgroundColor: '#fff', borderColor: '#CBD5E1', borderWidth: 1, position: 'relative', overflow: 'hidden', elevation: 4, ...Platform.select({ web: { boxShadow: '0 4px 8px rgba(0,0,0,0.15)' } as any, default: { shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } } }) },
   emptyPreview:    { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   emptyPreviewText: { fontSize: 13, color: '#94A3B8' },
   infoRow:         { gap: 8 },

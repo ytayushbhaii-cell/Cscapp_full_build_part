@@ -25,7 +25,7 @@ import { writePngFromRGBA } from './exportUtils';
 let backendReady: Promise<void> | null = null;
 async function ensureBackend(): Promise<void> {
   if (!backendReady) {
-    backendReady = tf.ready().then(() => tf.setBackend('cpu').catch(() => {}));
+    backendReady = tf.ready().then(async () => { try { await tf.setBackend('cpu'); } catch { /* ignore */ } });
   }
   return backendReady;
 }

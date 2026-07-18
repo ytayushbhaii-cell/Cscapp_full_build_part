@@ -121,7 +121,7 @@ export default function WatermarkScreen() {
           {image && (
             <View style={[styles.wmarkPreview, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
               <Image source={{ uri: image.uri }} style={[styles.wmarkImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-              <View style={[styles.wmarkBadge, styles[posId as keyof typeof styles] ?? styles['bottom-right']]}>
+              <View style={[styles.wmarkBadge, (styles[posId as keyof typeof styles] ?? styles['bottom-right']) as any]}>
                 <Text style={[styles.wmarkText, { color: dark ? '#000' : '#fff', fontSize: size / 3, opacity }]}>{text}</Text>
               </View>
             </View>

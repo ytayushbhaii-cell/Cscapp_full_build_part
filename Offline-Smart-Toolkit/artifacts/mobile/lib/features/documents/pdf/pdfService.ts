@@ -111,7 +111,7 @@ export async function passwordProtectPdf(uri: string, password: string): Promise
   const out = await doc.save({
     userPassword: password,
     ownerPassword: password + '_owner',
-  });
+  } as any);
   return writePdfBytes(out, `protected-${Date.now()}.pdf`);
 }
 
@@ -122,7 +122,7 @@ export async function removePasswordFromPdf(uri: string, currentPassword: string
     const doc = await PDFDocument.load(bytes, {
       password: currentPassword,
       ignoreEncryption: false,
-    });
+    } as any);
     const out = await doc.save(); // saves without password
     return writePdfBytes(out, `unlocked-${Date.now()}.pdf`);
   } catch {

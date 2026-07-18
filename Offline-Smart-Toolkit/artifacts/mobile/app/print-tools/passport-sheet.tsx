@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
   infoCard:       { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1 },
   infoText:       { flex: 1, fontSize: 12, lineHeight: 16 },
   previewContainer: { alignItems: 'center', padding: 16, borderWidth: 1, gap: 10 },
-  paperSheet:     { borderWidth: 1, position: 'relative', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  paperSheet:     { borderWidth: 1, position: 'relative', overflow: 'hidden', elevation: 2, ...Platform.select({ web: { boxShadow: '0 2px 4px rgba(0,0,0,0.10)' } as any, default: { shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } } }) },
   previewCaption: { fontSize: 12 },
   exportBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 15, gap: 8, marginTop: 8 },
   exportText:     { fontSize: 16, color: '#fff' },

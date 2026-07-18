@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  Platform,
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -147,10 +148,7 @@ const styles = StyleSheet.create({
     width: DRAWER_WIDTH,
     paddingHorizontal: 16,
     elevation: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 6, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
+    ...Platform.select({ web: { boxShadow: '6px 0 16px rgba(0,0,0,0.25)' } as any, default: { shadowColor: '#000', shadowOffset: { width: 6, height: 0 }, shadowOpacity: 0.25, shadowRadius: 16 } }),
     borderRightWidth: 1,
   },
   drawerHeader: {

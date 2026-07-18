@@ -167,8 +167,9 @@ export async function readImageMetadata(uri: string): Promise<ImageMetadata | nu
       const res = await fetch(uri);
       buf = new Uint8Array(await res.arrayBuffer());
     } else {
-      const { FileSystem } = await import('expo-file-system');
-      const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const EFS = (await import('expo-file-system')) as any;
+      const b64 = await EFS.readAsStringAsync(uri, { encoding: 'base64' });
       const bin = atob(b64);
       buf = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);

@@ -11,15 +11,15 @@ An offline-first mobile toolkit (Expo / React Native) for CSC Centers, Cyber Caf
 - **PDF:** pdf-lib (pure-JS, offline)
 - **OCR:** Tesseract.js (offline WASM)
 - **DB:** expo-sqlite (native) / no-op web stubs
-- **State:** React Context (AppContext, ThemeContext, DrawerContext)
+- **State:** React Context (AppContext, ThemeContext, DrawerContext, SettingsContext)
 - **Package manager:** pnpm (workspace monorepo)
 
 ### Monorepo layout
 ```
 Offline-Smart-Toolkit/
   artifacts/
-    mobile/       ← Expo app (the main thing)
-    api-server/   ← Express + Drizzle ORM backend (pre-built, dist/)
+    mobile/       ← Expo app (the main deliverable)
+    api-server/   ← Express + Drizzle ORM backend (optional)
 ```
 
 ## How to run
@@ -29,45 +29,104 @@ Workflow: **Start application**
 cd Offline-Smart-Toolkit/artifacts/mobile && PORT=5000 EXPO_PUBLIC_PORT=5000 pnpm exec expo start --web --port 5000
 ```
 
-The web build opens on port 5000. Native (Android/iOS) is built separately via `expo run:android` / `expo run:ios`.
+The web build opens on port 5000. Native (Android/iOS) is built separately via EAS Build.
+
+## APK Build Instructions
+
+### Prerequisites
+1. Install EAS CLI globally: `npm install -g eas-cli`
+2. Log in to Expo account: `eas login`
+3. Link project to Expo: `eas init` (run inside `Offline-Smart-Toolkit/artifacts/mobile/`)
+
+### Build Configuration
+The `eas.json` file is at `Offline-Smart-Toolkit/artifacts/mobile/eas.json` with three profiles:
+
+| Profile | Command | Output |
+|---|---|---|
+| Development (debug APK) | `eas build --platform android --profile development` | `app-debug.apk` |
+| Preview (release APK) | `eas build --platform android --profile preview` | `app-release.apk` |
+| Production (release APK) | `eas build --platform android --profile production` | `app-release.apk` |
+
+### Quick APK Build (Preview)
+```bash
+cd Offline-Smart-Toolkit/artifacts/mobile
+eas build --platform android --profile preview --local
+```
+
+> **Note:** `--local` builds on this machine. Remove it to build on Expo's cloud servers.
+
+### App Configuration
+| Field | Value |
+|---|---|
+| App Name | CSC Smart Toolkit |
+| Package Name | com.cscsmarttoolkit.app |
+| Version | 1.0.0 |
+| Bundle ID (iOS) | com.cscsmarttoolkit.app |
+| Min SDK | Android 5.0+ (API 21) |
+| Target SDK | Android 14 (API 34) |
+
+### Required Permissions (auto-added by Expo plugins)
+- `CAMERA` — QR scanner, document scanner
+- `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` — file import/export
+- `READ_MEDIA_IMAGES` — Android 13+ photo access
+
+### Build Without EAS (Local Gradle)
+```bash
+cd Offline-Smart-Toolkit/artifacts/mobile
+pnpm exec expo prebuild --platform android --clean
+cd android
+./gradlew assembleRelease
+# APK output: android/app/build/outputs/apk/release/app-release.apk
+```
 
 ## Feature modules
 
 | Module | Route | Status |
 |---|---|---|
-| Photo Tools (BG remove, segmentation, etc.) | `/photo-tools` | ✅ |
-| Document Tools (Aadhaar, PAN, Voter, PDF) | `/document-tools` | ✅ |
-| QR & Barcode | `/qr-tools` | ✅ |
-| Signature & Stamp | `/signature-tools` | ✅ |
-| ID Card Generator | `/id-card-tools` | ✅ |
-| **Print Layout System** | `/print-tools` | ✅ Part 7 |
-| Barcode Tools | `/barcode-tools` | ✅ |
+| Photo Tools (BG remove, segmentation, etc.) | `/photo-tools` | ✅ Part 3 |
+| Document Tools (Aadhaar, PAN, Voter, DL, Passport, PDF) | `/document-tools` | ✅ Part 4 |
+| QR & Barcode | `/qr-tools`, `/barcode-tools` | ✅ Part 5 |
+| Signature & Stamp | `/signature-tools`, `/stamp-maker` | ✅ Part 5 |
+| ID Card Generator | `/id-card-tools` | ✅ Part 6 |
+| Print Layout | `/print-tools` | ✅ Part 7 |
+| Utility Tools | `/utility-tools` | ✅ Part 8 |
+| Settings | `/settings` | ✅ Part 9 |
 
-## Print Layout System (Part 7)
+## Screen Inventory (Part 11 Audit — 129 total screens)
 
-All files under `lib/printTools/` and `app/print-tools/`.
+### Tabs (main navigation)
+- `(tabs)/index.tsx` — Branded splash screen (3s → dashboard)
+- `(tabs)/dashboard.tsx` — Dashboard home
+- `(tabs)/tools.tsx` — All tools grid
+- `(tabs)/search.tsx` — Search
+- `(tabs)/favorites.tsx` — Favorites
+- `(tabs)/recent.tsx` — Recent files
+- `(tabs)/history.tsx` — Usage history
+- `(tabs)/most-used.tsx` — Most-used tools
+- `(tabs)/settings.tsx` — Settings hub
 
-### Screens
-- `app/print-tools/index.tsx` — Home (hero, search, recent prints)
-- `app/print-tools/a4-layout.tsx` — A4 Layout Tool
-- `app/print-tools/passport-sheet.tsx` — Passport Sheet Generator (2/4/6/8/12 photos)
-- `app/print-tools/multiple-copies.tsx` — Multiple Copies Tool
-- `app/print-tools/custom-paper.tsx` — Custom Paper Size Tool
-- `app/print-tools/print-preview.tsx` — Print Preview (zoom, rotate, margin)
+### Photo Tools (25 screens)
+background-changer, background-remove, batch-rename, batch-resize, blue-background, blur-background, color-correction, compress, converter, crop, dpi-converter, duplicate-finder, enhance, face-center, face-restore, metadata-viewer, mirror, passport-photo, red-background, resize, rotate-flip, transparent-png, watermark, white-background
 
-### Services
-- `lib/printTools/LayoutService.ts` — All layout maths (mm-based, 100% offline)
-- `lib/printTools/ExportService.ts` — PDF / PNG / JPG export
-- `lib/printTools/PrintService.ts` — High-level job orchestrator
-- `lib/printTools/PreviewService.ts` — mm → pixel conversion for previews
-- `lib/printTools/db.ts` — SQLite persistence (native)
-- `lib/printTools/db.web.ts` — No-op web stub
+### Document Tools (26 screens)
+Aadhaar (9), PAN (6), Voter (5), Driving License (5), Passport (5), PDF (12 — compress, delete-pages, extract-pages, from-image, info, merge, ocr, password-protect, rearrange, remove-password, rename, rotate, search, split, to-image)
+
+### QR Tools: generator, scanner
+### Barcode Tools: generator, scanner
+### Signature Tools: bg-remove, maker
+### Stamp Maker: company-stamp, csc-stamp
+### ID Card Tools: custom, employee, student, visitor
+### Print Tools: a4-layout, custom-paper, multiple-copies, passport-sheet, print-preview
+### Utility Tools: age-calculator, calendar, percentage-calculator
+### Settings: backup, default-folder, language, print-size, theme
 
 ## Key architecture notes
 
 - **Web stubs:** Every SQLite-backed `db.ts` has a `db.web.ts` no-op sibling. Metro picks `.web.ts` automatically on web builds.
-- **Metro config:** `metro.config.js` has `resolveRequest` overrides to force pdf-lib → CJS and onnxruntime-web → wasm-only bundle.
+- **Metro config:** `metro.config.js` has `resolveRequest` overrides to force pdf-lib → CJS and handles ONNX/WASM as assets.
+- **Platform shadows:** All `shadow*` style props wrapped in `Platform.select` for web/native compatibility.
 - **Offline guarantee:** No `fetch()` calls to external URLs in any tool screen. All AI models are bundled in `assets/models/` or `assets/ort-wasm/`.
+- **ortLoader:** `.web.ts` / `.native.ts` platform extensions handle ONNX Runtime loading. `ortLoader.ts` provides TypeScript type fallback.
 
 ## User preferences
 
@@ -75,3 +134,4 @@ All files under `lib/printTools/` and `app/print-tools/`.
 - Flutter migration must be possible in the future (keep architecture flat and service-oriented)
 - Material Design aesthetic, light + dark theme support
 - Premium cards, rounded corners, smooth animations
+- Package name: `com.cscsmarttoolkit.app`

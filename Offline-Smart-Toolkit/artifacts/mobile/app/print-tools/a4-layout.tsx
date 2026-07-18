@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   toggleLabel:    { fontSize: 13 },
   sliderSection:  { marginBottom: 8 },
   previewContainer: { alignItems: 'center', padding: 20, borderWidth: 1, marginBottom: 20, gap: 12 },
-  paperPreview:   { borderWidth: 1, position: 'relative', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+  paperPreview:   { borderWidth: 1, position: 'relative', overflow: 'hidden', elevation: 2, ...Platform.select({ web: { boxShadow: '0 2px 4px rgba(0,0,0,0.08)' } as any, default: { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } } }) },
   previewInfo:    { gap: 4, alignItems: 'center' },
   previewInfoText: { fontSize: 12 },
   exportBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },

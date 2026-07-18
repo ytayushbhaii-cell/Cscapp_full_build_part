@@ -3,7 +3,7 @@
 // No state, no hooks other than pure rendering.
 
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet, Platform } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { getTemplate } from '@/lib/features/id-card/templates';
 import type { StudentIDData } from '@/lib/features/id-card/types';
@@ -170,7 +170,7 @@ function InfoRow({
 }
 
 const s = StyleSheet.create({
-  card: { borderRadius: 12, overflow: 'hidden', borderWidth: 1, elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8 },
+  card: { borderRadius: 12, overflow: 'hidden', borderWidth: 1, elevation: 6, ...Platform.select({ web: { boxShadow: '0 3px 8px rgba(0,0,0,0.15)' } as any, default: { shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.15, shadowRadius: 8 } }) },
   // Front
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, gap: 8 },
   logo: { width: 36, height: 36 },

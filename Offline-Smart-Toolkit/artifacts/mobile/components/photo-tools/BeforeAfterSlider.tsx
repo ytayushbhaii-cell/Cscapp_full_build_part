@@ -109,7 +109,7 @@ export function BeforeAfterSlider({
 
       {/* Drag handle — the interactive element */}
       <View
-        style={[styles.handle, { left: divX - 20, backgroundColor: '#fff', shadowColor: '#000' }]}
+        style={[styles.handle, { left: divX - 20, backgroundColor: '#fff', ...(Platform.OS === 'web' ? { boxShadow: '0 2px 8px rgba(0,0,0,0.3)' } : { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4 }) }]}
         {...panResponderFixed.panHandlers}
       >
         <MaterialCommunityIcons name="arrow-split-vertical" size={16} color="#333" />
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
   img: { width: '100%' },
   beforeClip: { position: 'absolute', top: 0, left: 0, overflow: 'hidden' },
   imgAbsolute: { position: 'absolute', top: 0, left: 0 },
-  dividerLine: { position: 'absolute', top: 0, width: 2, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 2, elevation: 3 },
+  dividerLine: { position: 'absolute', top: 0, width: 2, elevation: 3, ...Platform.select({ web: { boxShadow: '0 0 2px rgba(0,0,0,0.3)' } as any, default: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 2 } }) },
   handle: {
     position: 'absolute', top: '50%', marginTop: -20,
     width: 40, height: 40, borderRadius: 20,
