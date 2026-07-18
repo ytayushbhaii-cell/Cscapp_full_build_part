@@ -2,6 +2,15 @@
 
 An offline-first toolkit for CSC (Common Service Centre) & Cyber Cafe workers. Offers photo tools, PDF utilities, QR/barcode generation, Aadhaar/PAN document services, and more — all running 100% offline.
 
+## Features
+
+- **Photo Tools** — background removal, resize, compress, format conversion, watermark, and more
+- **Document Tools** — Aadhaar, PAN, Voter ID, Driving License, Passport, PDF merge/split/compress
+- **QR & Barcode** — generate and scan QR codes, barcodes
+- **Signature & Stamp** — digital signatures, stamp creation
+- **ID Card Generator** — custom ID card layouts
+- **Print Layout System** — A4 layout, passport photo sheets (2/4/6/8/12 photos), multiple copies, custom paper sizes, print preview with zoom/rotate and PDF export
+
 ## Architecture
 
 This is a **pnpm monorepo** located under `Offline-Smart-Toolkit/`.

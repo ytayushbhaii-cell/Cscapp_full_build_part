@@ -5,6 +5,7 @@ import { ALL_DOC_TOOLS } from '@/lib/features/documents/tools';
 import { ALL_QR_TOOLS } from '@/lib/features/qr/tools';
 import { ALL_SIG_TOOLS } from '@/lib/features/signature/tools';
 import { ALL_ID_CARD_TOOLS, ID_CARD_COLOR } from '@/lib/features/id-card/tools';
+import { PRINT_TOOLS, PRINT_COLOR } from '@/lib/printTools/tools';
 
 export interface RecentFile {
   id: string;
@@ -115,12 +116,23 @@ const ID_CARD_TOOL_ENTRIES: Tool[] = ALL_ID_CARD_TOOLS.map((t) => ({
   route: t.route,
 }));
 
+const PRINT_TOOL_ENTRIES: Tool[] = PRINT_TOOLS.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: 'Print Tools',
+  iconName: t.iconName,
+  color: t.color,
+  description: t.description,
+  route: t.route,
+}));
+
 export const ALL_TOOLS: Tool[] = [
   ...PHOTO_TOOL_ENTRIES,
   ...DOC_TOOL_ENTRIES,
   ...QR_TOOL_ENTRIES,
   ...SIG_TOOL_ENTRIES,
   ...ID_CARD_TOOL_ENTRIES,
+  ...PRINT_TOOL_ENTRIES,
 ];
 
 export const ALL_CATEGORIES: ToolCategory[] = [
@@ -135,6 +147,7 @@ export const ALL_CATEGORIES: ToolCategory[] = [
   { id: 'signature',name: 'Signature & Stamp',      iconName: 'draw',                          color: '#EC4899', gradient: ['#EC4899', '#DB2777'], count: ALL_SIG_TOOLS.length },
   { id: 'id-card',  name: 'ID Card Generator',      iconName: 'card-account-details-outline', color: ID_CARD_COLOR, gradient: [ID_CARD_COLOR, '#4F46E5'], count: ALL_ID_CARD_TOOLS.length },
   { id: 'utilities',name: 'Utilities',              iconName: 'tools',                         color: '#64748B', gradient: ['#64748B', '#475569'], count: 7  },
+  { id: 'print',    name: 'Print Layout',           iconName: 'printer',                       color: PRINT_COLOR, gradient: [PRINT_COLOR, '#4F46E5'], count: PRINT_TOOLS.length },
 ];
 
 const AppContext = createContext<AppContextType>({
