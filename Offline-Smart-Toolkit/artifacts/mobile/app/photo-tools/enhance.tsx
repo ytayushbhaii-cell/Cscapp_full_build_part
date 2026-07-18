@@ -56,23 +56,31 @@ export default function EnhanceScreen() {
   const [vibranceV, setVibranceV]     = useState(0);
   const [clarityV, setClarityV]       = useState(0);
   const [processing, setProcessing]   = useState(false);
+  const [progress, setProgress]       = useState(0);
   const [error, setError]             = useState<string | null>(null);
   const [result, setResult]           = useState<{ uri: string } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); setBrightness(0); setContrast(0); setSaturation(0); setSharpness(0); setExposure(0); setHighlights(0); setShadows(0); setTemperature(0); setVibranceV(0); setClarityV(0); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); setBrightness(0); setContrast(0); setSaturation(0); setSharpness(0); setExposure(0); setHighlights(0); setShadows(0); setTemperature(0); setVibranceV(0); setClarityV(0); };
 
   const applyPreset = (p: typeof PRESETS[0]) => { setBrightness(p.brightness); setContrast(p.contrast); setSaturation(p.saturation); setSharpness(p.sharpness); setExposure(p.exposure); setHighlights(p.highlights); setShadows(p.shadows); setTemperature(p.temperature); setVibranceV(p.vibranceV); setClarityV(p.clarityV); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(10);
       let rgba = await decodeToRGBA(image.uri);
+      setProgress(30);
       rgba = adjustImage(rgba, { brightness, contrast, saturation, exposure, highlights, shadows, temperature });
+      setProgress(50);
       if (vibranceV !== 0) rgba = vibrance(rgba, vibranceV);
+      setProgress(65);
       if (clarityV > 0) rgba = clarity(rgba, clarityV);
+      setProgress(80);
       if (sharpness > 0) rgba = sharpenImage(rgba, sharpness);
+      setProgress(92);
       const uri = await encodeRGBAToUri(rgba);
+      setProgress(100);
       setResult({ uri });
       recordToolUsage('photo-enhance').catch(() => {});
       addRecentFile({ toolId: 'photo-enhance', toolName: 'Photo Enhance', fileName: guessFileName('enhanced', 'png'), resultUri: uri }).catch(() => {});
@@ -85,16 +93,25 @@ export default function EnhanceScreen() {
 
   const autoEnhance = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(8);
       let rgba = await decodeToRGBA(image.uri);
+      setProgress(22);
       rgba = autoLevels(rgba);
+      setProgress(36);
       rgba = autoWhiteBalance(rgba);
+      setProgress(50);
       rgba = adjustImage(rgba, { contrast: 8, saturation: 10, shadows: 12, highlights: -5 });
+      setProgress(64);
       rgba = vibrance(rgba, 20);
+      setProgress(76);
       rgba = clarity(rgba, 15);
+      setProgress(88);
       rgba = sharpenImage(rgba, 25);
+      setProgress(95);
       const uri = await encodeRGBAToUri(rgba);
+      setProgress(100);
       setResult({ uri });
       recordToolUsage('photo-enhance').catch(() => {});
       addRecentFile({ toolId: 'photo-enhance', toolName: 'Photo Enhance', fileName: guessFileName('enhanced', 'png'), resultUri: uri }).catch(() => {});
@@ -160,7 +177,7 @@ export default function EnhanceScreen() {
             onPress={process} disabled={processing} activeOpacity={0.85}>
             {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="auto-fix" size={18} color="#fff" />}
             <Text style={[styles.processBtnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Enhancing…' : 'Apply Enhancements'}
+              {processing ? `Enhancing… ${progress}%` : 'Apply Enhancements'}
             </Text>
           </TouchableOpacity>
         </>

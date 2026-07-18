@@ -48,20 +48,27 @@ export default function ColorCorrectionScreen() {
   const [sat, setSat]         = useState(0);
   const [vibranceV, setVibranceV] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); setGamma(100); setTemp(0); setTint(0); setHi(0); setSh(0); setHue(0); setSat(0); setVibranceV(0); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); setGamma(100); setTemp(0); setTint(0); setHi(0); setSh(0); setHue(0); setSat(0); setVibranceV(0); };
 
   const autoFix = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(10);
       let rgba = await decodeToRGBA(image.uri);
+      setProgress(38);
       rgba = autoLevels(rgba);
+      setProgress(60);
       rgba = autoWhiteBalance(rgba);
+      setProgress(80);
       rgba = vibrance(rgba, 15);
+      setProgress(93);
       const uri = await encodeRGBAToUri(rgba);
+      setProgress(100);
       setResult({ uri });
       recordToolUsage('color-correction').catch(() => {});
       addRecentFile({ toolId: 'color-correction', toolName: 'Color Correction', fileName: guessFileName('color-corrected', 'png'), resultUri: uri }).catch(() => {});
@@ -71,14 +78,21 @@ export default function ColorCorrectionScreen() {
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(10);
       let rgba = await decodeToRGBA(image.uri);
+      setProgress(30);
       if (gamma !== 100) rgba = gammaCorrect(rgba, gamma / 100);
+      setProgress(50);
       rgba = adjustImage(rgba, { temperature: temp, tint, highlights: hi, shadows: sh });
+      setProgress(68);
       if (hue !== 0 || sat !== 0) rgba = hslAdjust(rgba, hue, sat, 0);
+      setProgress(82);
       if (vibranceV !== 0) rgba = vibrance(rgba, vibranceV);
+      setProgress(93);
       const uri = await encodeRGBAToUri(rgba);
+      setProgress(100);
       setResult({ uri });
       recordToolUsage('color-correction').catch(() => {});
       addRecentFile({ toolId: 'color-correction', toolName: 'Color Correction', fileName: guessFileName('color-corrected', 'png'), resultUri: uri }).catch(() => {});
@@ -127,7 +141,7 @@ export default function ColorCorrectionScreen() {
             onPress={process} disabled={processing} activeOpacity={0.85}>
             {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="palette" size={18} color="#fff" />}
             <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Applying…' : 'Apply Correction'}
+              {processing ? `Applying… ${progress}%` : 'Apply Correction'}
             </Text>
           </TouchableOpacity>
         </>

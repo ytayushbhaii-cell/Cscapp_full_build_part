@@ -19,18 +19,21 @@ export default function RotateFlipScreen() {
   const [image, setImage]       = useState<PickedImage | null>(null);
   const [current, setCurrent]   = useState<{ uri: string; width: number; height: number } | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]       = useState<string | null>(null);
   const [originalUri, setOriginalUri] = useState<string | null>(null);
 
-  const reset = () => { setImage(null); setCurrent(null); setError(null); setOriginalUri(null); };
+  const reset = () => { setImage(null); setCurrent(null); setError(null); setOriginalUri(null); setProgress(0); };
 
   const applyOp = async (op: () => Promise<{ uri: string; width: number; height: number }>) => {
     const src = current ?? image;
     if (!src) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(30);
       if (!originalUri) setOriginalUri(image?.uri ?? null);
       const out = await op();
+      setProgress(100);
       setCurrent(out);
       recordToolUsage('rotate-flip').catch(() => {});
       addRecentFile({ toolId: 'rotate-flip', toolName: 'Rotate & Flip', fileName: guessFileName('rotated', 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -88,7 +91,12 @@ export default function RotateFlipScreen() {
             </View>
           </View>
 
-          {processing && <ActivityIndicator color={COLOR} style={{ alignSelf: 'center' }} />}
+          {processing && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <ActivityIndicator color={COLOR} />
+              <Text style={{ color: COLOR, fontFamily: 'Inter_700Bold', fontSize: 15 }}>{progress}%</Text>
+            </View>
+          )}
         </>
       )}
 

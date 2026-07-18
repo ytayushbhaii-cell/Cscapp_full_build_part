@@ -34,11 +34,12 @@ export default function BatchRenameScreen() {
   const [startAt, setStartAt] = useState('1');
   const [useDate, setUseDate] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [done, setDone]       = useState(false);
   const [zipUri, setZipUri]   = useState<string | null>(null);
 
-  const reset = () => { setFiles([]); setError(null); setDone(false); setZipUri(null); };
+  const reset = () => { setFiles([]); setError(null); setDone(false); setZipUri(null); setProgress(0); };
 
   const pickFiles = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: true, mediaTypes: ImagePicker.MediaTypeOptions.All, quality: 1 });
@@ -54,15 +55,18 @@ export default function BatchRenameScreen() {
 
   const process = async () => {
     if (!files.length) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(20);
       const dateStr = useDate ? `_${new Date().toISOString().slice(0, 10)}` : '';
       const renamed = files.map((f, i) => {
         const ext = f.name.split('.').pop() ?? 'jpg';
         const newName = `${buildName(prefix, suffix + dateStr, numMode, i + startNum)}.${ext}`;
         return { uri: f.uri, name: newName };
       });
+      setProgress(50);
       const zip = await batchRenameAndZip(renamed);
+      setProgress(100);
       setZipUri(zip);
       setDone(true);
       recordToolUsage('batch-rename').catch(() => {});
@@ -157,7 +161,7 @@ export default function BatchRenameScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="rename-box" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Creating ZIP…' : `Rename & Download ZIP (${files.length} files)`}
+            {processing ? `Creating ZIP… ${progress}%` : `Rename & Download ZIP (${files.length} files)`}
           </Text>
         </TouchableOpacity>
       )}

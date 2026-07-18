@@ -33,17 +33,20 @@ export default function ConverterScreen() {
   const [formatId, setFmtId]  = useState('jpeg');
   const [qualityQ, setQuality] = useState(0.90);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string; ext: string } | null>(null);
 
   const fmt = FORMATS.find((f) => f.id === formatId)!;
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(30);
       const out = await convertFormat(image.uri, fmt.format, qualityQ);
+      setProgress(100);
       setResult({ uri: out.uri, ext: fmt.ext });
       recordToolUsage('image-converter').catch(() => {});
       addRecentFile({ toolId: 'image-converter', toolName: 'Image Converter', fileName: guessFileName('converted', fmt.ext), resultUri: out.uri }).catch(() => {});
@@ -101,7 +104,7 @@ export default function ConverterScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="file-swap-outline" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Converting…' : `Convert to ${fmt.label}`}
+            {processing ? `Converting… ${progress}%` : `Convert to ${fmt.label}`}
           </Text>
         </TouchableOpacity>
       )}

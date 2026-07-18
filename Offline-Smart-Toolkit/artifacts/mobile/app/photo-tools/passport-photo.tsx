@@ -45,6 +45,7 @@ export default function PassportPhotoScreen() {
   const [sizeId, setSizeId] = useState(SIZES[0].id);
   const [copies, setCopies] = useState(8);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [steps, setSteps] = useState(makeSteps(STEPS));
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
@@ -53,7 +54,7 @@ export default function PassportPhotoScreen() {
 
   const size = SIZES.find((s) => s.id === sizeId)!;
 
-  const reset = () => { setImage(null); setResult(null); setError(null); setQualityHint(null); setSteps(makeSteps(STEPS)); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setQualityHint(null); setSteps(makeSteps(STEPS)); setProgress(0); };
 
   const tick = (id: string, status: 'running' | 'done' | 'error', ms?: number) =>
     setSteps((s) => updateStep(s, id, status, ms));
@@ -64,37 +65,38 @@ export default function PassportPhotoScreen() {
     setError(null);
     setQualityHint(null);
     setSteps(makeSteps(STEPS));
+    setProgress(0);
 
     try {
-      tick('decode', 'running');
+      tick('decode', 'running'); setProgress(5);
       await new Promise((r) => setTimeout(r, 20));
-      tick('decode', 'done', 0);
+      tick('decode', 'done', 0); setProgress(10);
 
-      tick('segment', 'running');
+      tick('segment', 'running'); setProgress(15);
       const t1 = Date.now();
       const [{ centroid }, whiteBg] = await Promise.all([
         segmentPerson(image.uri),
         removeBackground(image.uri, 'white'),
       ]);
-      tick('segment', 'done', Date.now() - t1);
+      tick('segment', 'done', Date.now() - t1); setProgress(55);
 
-      tick('matte', 'running');
+      tick('matte', 'running'); setProgress(62);
       await new Promise((r) => setTimeout(r, 10));
       tick('matte', 'done', 0); // happens inside removeBackground
 
-      tick('bg', 'running');
+      tick('bg', 'running'); setProgress(68);
       await new Promise((r) => setTimeout(r, 10));
       tick('bg', 'done', 0);
 
-      tick('face', 'running');
+      tick('face', 'running'); setProgress(74);
       const focus = centroid
         ? { x: centroid.x, y: Math.max(0.12, centroid.y - 0.1) }
         : undefined;
       if (!centroid) setQualityHint('No face detected — using center crop. For best results, use a clear front-facing photo.');
       else setQualityHint('Face detected and centered automatically.');
-      tick('face', 'done', 0);
+      tick('face', 'done', 0); setProgress(80);
 
-      tick('crop', 'running');
+      tick('crop', 'running'); setProgress(84);
       const t5 = Date.now();
       const targetW = mm(size.mmW);
       const targetH = mm(size.mmH);
@@ -102,7 +104,7 @@ export default function PassportPhotoScreen() {
         whiteBg.uri, { width: whiteBg.width, height: whiteBg.height },
         { width: targetW, height: targetH }, focus,
       );
-      tick('crop', 'done', Date.now() - t5);
+      tick('crop', 'done', Date.now() - t5); setProgress(100);
 
       setResult(cropped);
       recordToolUsage('passport-photo').catch(() => {});
@@ -171,7 +173,7 @@ export default function PassportPhotoScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="card-account-details" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Processing on-device…' : 'Create Passport Photo'}
+            {processing ? `Processing… ${progress}%` : 'Create Passport Photo'}
           </Text>
         </TouchableOpacity>
       )}

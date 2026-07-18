@@ -35,26 +35,27 @@ export default function BlurBackgroundScreen() {
   const [image, setImage]   = useState<PickedImage | null>(null);
   const [levelId, setLevelId] = useState('medium');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [steps, setSteps]   = useState(makeSteps(STEPS));
   const [error, setError]   = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
 
   const level = LEVELS.find((l) => l.id === levelId)!;
-  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); setProgress(0); };
   const tick = (id: string, s: 'running' | 'done' | 'error', ms?: number) => setSteps((p) => updateStep(p, id, s, ms));
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null); setSteps(makeSteps(STEPS));
+    setProcessing(true); setError(null); setSteps(makeSteps(STEPS)); setProgress(0);
     try {
-      tick('decode',   'running'); await new Promise((r) => setTimeout(r, 20)); tick('decode',   'done', 0);
-      tick('segment',  'running');
+      tick('decode',   'running'); setProgress(5); await new Promise((r) => setTimeout(r, 20)); tick('decode',   'done', 0); setProgress(15);
+      tick('segment',  'running'); setProgress(20);
       const t = Date.now();
       const out = await blurBackground(image.uri, level.radius);
-      tick('segment',  'done', Date.now() - t);
-      tick('matte',    'running'); await new Promise((r) => setTimeout(r, 10)); tick('matte',    'done', 0);
-      tick('blur',     'running'); await new Promise((r) => setTimeout(r, 10)); tick('blur',     'done', 0);
-      tick('composite','running'); await new Promise((r) => setTimeout(r, 10)); tick('composite','done', 0);
+      tick('segment',  'done', Date.now() - t); setProgress(68);
+      tick('matte',    'running'); setProgress(75); await new Promise((r) => setTimeout(r, 10)); tick('matte',    'done', 0); setProgress(82);
+      tick('blur',     'running'); setProgress(87); await new Promise((r) => setTimeout(r, 10)); tick('blur',     'done', 0); setProgress(93);
+      tick('composite','running'); setProgress(96); await new Promise((r) => setTimeout(r, 10)); tick('composite','done', 0); setProgress(100);
       setResult(out);
       recordToolUsage('blur-background').catch(() => {});
       addRecentFile({ toolId: 'blur-background', toolName: 'Blur Background', fileName: guessFileName('blur-bg', 'png'), resultUri: out.uri }).catch(() => {});
@@ -106,7 +107,7 @@ export default function BlurBackgroundScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="blur" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Blurring background…' : `Apply ${level.label} Blur`}
+            {processing ? `Blurring background… ${progress}%` : `Apply ${level.label} Blur`}
           </Text>
         </TouchableOpacity>
       )}

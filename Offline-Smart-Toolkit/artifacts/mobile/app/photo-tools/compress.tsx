@@ -29,10 +29,11 @@ export default function CompressScreen() {
   const [quality, setQuality] = useState(0.70);
   const [presetId, setPresetId] = useState('custom');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string; width: number; height: number; size?: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const applyPreset = (p: typeof QUALITY_PRESETS[0]) => {
     setPresetId(p.id);
@@ -41,10 +42,13 @@ export default function CompressScreen() {
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(20);
       const out = await compressImage(image.uri, quality);
+      setProgress(80);
       const size = await readFileSize(out.uri);
+      setProgress(100);
       setResult({ ...out, size });
       recordToolUsage('photo-compress').catch(() => {});
       addRecentFile({ toolId: 'photo-compress', toolName: 'Photo Compress', fileName: guessFileName('compressed', 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -93,7 +97,7 @@ export default function CompressScreen() {
             onPress={process} disabled={processing} activeOpacity={0.85}>
             {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="zip-box-outline" size={18} color="#fff" />}
             <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Compressing…' : `Compress to ${Math.round(quality * 100)}%`}
+              {processing ? `Compressing… ${progress}%` : `Compress to ${Math.round(quality * 100)}%`}
             </Text>
           </TouchableOpacity>
         </>

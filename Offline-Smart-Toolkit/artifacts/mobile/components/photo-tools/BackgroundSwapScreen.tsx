@@ -57,11 +57,12 @@ export function BackgroundSwapScreen({
   const [image, setImage] = useState<PickedImage | null>(null);
   const [preset, setPreset] = useState<BackgroundPreset>(defaultPreset);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [steps, setSteps] = useState(makeSteps(PROCESSING_STEPS));
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(PROCESSING_STEPS)); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(PROCESSING_STEPS)); setProgress(0); };
 
   const tick = (id: string, status: 'running' | 'done' | 'error', ms?: number) =>
     setSteps((s) => updateStep(s, id, status, ms));
@@ -71,30 +72,32 @@ export function BackgroundSwapScreen({
     setProcessing(true);
     setError(null);
     setSteps(makeSteps(PROCESSING_STEPS));
+    setProgress(0);
     const t0 = Date.now();
 
     try {
-      tick('decode', 'running');
+      tick('decode', 'running'); setProgress(5);
       await new Promise((r) => setTimeout(r, 20)); // yield to re-render
-      tick('decode', 'done', Date.now() - t0);
+      tick('decode', 'done', Date.now() - t0); setProgress(15);
 
-      tick('segment', 'running');
+      tick('segment', 'running'); setProgress(20);
       const t1 = Date.now();
       // removeBackground now internally calls SegmentationService with soft matting
       const out = await removeBackground(image.uri, preset);
-      tick('segment', 'done', Date.now() - t1);
+      tick('segment', 'done', Date.now() - t1); setProgress(65);
 
-      tick('matte', 'running');
+      tick('matte', 'running'); setProgress(70);
       await new Promise((r) => setTimeout(r, 10));
       tick('matte', 'done', 0); // done inside removeBackground
+      setProgress(78);
 
-      tick('composite', 'running');
+      tick('composite', 'running'); setProgress(82);
       await new Promise((r) => setTimeout(r, 10));
-      tick('composite', 'done', 0);
+      tick('composite', 'done', 0); setProgress(88);
 
-      tick('encode', 'running');
+      tick('encode', 'running'); setProgress(92);
       await new Promise((r) => setTimeout(r, 10));
-      tick('encode', 'done', Date.now() - t0);
+      tick('encode', 'done', Date.now() - t0); setProgress(100);
 
       setResult(out);
       const fileName = guessFileName(toolId, 'png');
@@ -160,7 +163,7 @@ export function BackgroundSwapScreen({
         >
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="auto-fix" size={18} color="#fff" />}
           <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Processing…' : 'Remove Background'}
+            {processing ? `Processing… ${progress}%` : 'Remove Background'}
           </Text>
         </TouchableOpacity>
       )}

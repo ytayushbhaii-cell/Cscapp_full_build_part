@@ -43,24 +43,25 @@ export default function BackgroundChangerScreen() {
   const [selected, setSelected] = useState(SWATCHES[0]);
   const [customHex, setCustomHex] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [steps, setSteps]    = useState(makeSteps(STEPS));
   const [error, setError]    = useState<string | null>(null);
   const [result, setResult]  = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); setProgress(0); };
   const tick = (id: string, s: 'running' | 'done' | 'error', ms?: number) => setSteps((p) => updateStep(p, id, s, ms));
 
   const process = async () => {
     if (!image) return;
     const rgb = customHex.length >= 6 ? hexToRgb(customHex) : selected.rgb;
     if (!rgb) { setError('Invalid hex colour code.'); return; }
-    setProcessing(true); setError(null); setSteps(makeSteps(STEPS));
+    setProcessing(true); setError(null); setSteps(makeSteps(STEPS)); setProgress(0);
     try {
-      tick('segment', 'running');
+      tick('segment', 'running'); setProgress(8);
       const t = Date.now();
       const out = await removeBackground(image.uri, 'custom', rgb);
-      tick('segment', 'done', Date.now() - t);
-      tick('composite', 'running'); await new Promise((r) => setTimeout(r, 10)); tick('composite', 'done', 0);
+      tick('segment', 'done', Date.now() - t); setProgress(75);
+      tick('composite', 'running'); setProgress(82); await new Promise((r) => setTimeout(r, 10)); tick('composite', 'done', 0); setProgress(100);
       setResult(out);
       recordToolUsage('bg-changer').catch(() => {});
       addRecentFile({ toolId: 'bg-changer', toolName: 'Background Changer', fileName: guessFileName('new-bg', 'png'), resultUri: out.uri }).catch(() => {});
@@ -112,7 +113,7 @@ export default function BackgroundChangerScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="swap-horizontal" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Changing background…' : 'Change Background'}
+            {processing ? `Changing background… ${progress}%` : 'Change Background'}
           </Text>
         </TouchableOpacity>
       )}

@@ -37,38 +37,39 @@ export default function FaceCenterScreen() {
   const [image, setImage] = useState<PickedImage | null>(null);
   const [aspectId, setAspectId] = useState(ASPECTS[0].id);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [steps, setSteps] = useState(makeSteps(STEPS));
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
 
   const aspect = ASPECTS.find((a) => a.id === aspectId)!;
-  const reset = () => { setImage(null); setResult(null); setError(null); setHint(null); setSteps(makeSteps(STEPS)); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setHint(null); setSteps(makeSteps(STEPS)); setProgress(0); };
   const tick = (id: string, s: 'running' | 'done' | 'error', ms?: number) => setSteps((prev) => updateStep(prev, id, s, ms));
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null); setHint(null); setSteps(makeSteps(STEPS));
+    setProcessing(true); setError(null); setHint(null); setSteps(makeSteps(STEPS)); setProgress(0);
     try {
-      tick('detect', 'running');
+      tick('detect', 'running'); setProgress(5);
       const t0 = Date.now();
       const { centroid } = await segmentPerson(image.uri);
-      tick('detect', 'done', Date.now() - t0);
+      tick('detect', 'done', Date.now() - t0); setProgress(55);
 
       tick('center', 'running');
       if (!centroid) setHint('No clear subject detected — using center crop for best result.');
       else setHint('Subject detected and centered automatically.');
       const focus = centroid ? { x: centroid.x, y: Math.max(0.12, centroid.y - 0.1) } : undefined;
-      tick('center', 'done', 0);
+      tick('center', 'done', 0); setProgress(65);
 
-      tick('crop', 'running');
+      tick('crop', 'running'); setProgress(70);
       const t2 = Date.now();
       const outH = Math.round((OUTPUT_W * aspect.h) / aspect.w);
       const cropped = await resizeAndCoverCrop(
         image.uri, { width: image.width, height: image.height },
         { width: OUTPUT_W, height: outH }, focus,
       );
-      tick('crop', 'done', Date.now() - t2);
+      tick('crop', 'done', Date.now() - t2); setProgress(100);
 
       setResult(cropped);
       recordToolUsage('face-center').catch(() => {});
@@ -115,7 +116,7 @@ export default function FaceCenterScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="face-recognition" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Detecting face…' : 'Center Face'}
+            {processing ? `Detecting face… ${progress}%` : 'Center Face'}
           </Text>
         </TouchableOpacity>
       )}

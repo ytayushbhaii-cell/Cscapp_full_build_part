@@ -36,19 +36,22 @@ export default function WatermarkScreen() {
   const [posId, setPosId]     = useState('bottom-right');
   const [dark, setDark]       = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image || !text.trim()) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(30);
       // We use a high-quality JPEG output since we can't render text directly in pixel space without a canvas.
       // The watermark is applied as metadata-only in this CPU path; GFPGAN/canvas integration can upgrade this.
       // For now, compress and note the watermark text in the filename.
       const out = await manipulateAsync(image.uri, [], { compress: 0.92, format: SaveFormat.JPEG });
+      setProgress(100);
       // TODO: When Canvas API / Skia is available, render text at `posId` with `opacity` and `size`.
       setResult({ uri: out.uri });
       recordToolUsage('watermark').catch(() => {});
@@ -131,7 +134,7 @@ export default function WatermarkScreen() {
           onPress={process} disabled={processing || !text.trim()} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="water-outline" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Applying…' : 'Apply Watermark'}
+            {processing ? `Applying… ${progress}%` : 'Apply Watermark'}
           </Text>
         </TouchableOpacity>
       )}

@@ -38,6 +38,7 @@ export default function DpiConverterScreen() {
   const [dpi, setDpi]             = useState(300);
   const [printSizeId, setSizeId]  = useState('custom');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]         = useState<string | null>(null);
   const [result, setResult]       = useState<{ uri: string; width: number; height: number } | null>(null);
 
@@ -45,16 +46,18 @@ export default function DpiConverterScreen() {
   const targetW = printSize.mmW > 0 ? mmToPx(printSize.mmW, dpi) : null;
   const targetH = printSize.mmH > 0 ? mmToPx(printSize.mmH, dpi) : null;
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(30);
       const size = targetW && targetH
         ? { width: targetW, height: targetH }
         : { width: Math.round(image.width * dpi / 72) }; // scale from assumed 72 DPI source
       const out = await resizeImage(image.uri, size);
+      setProgress(100);
       setResult(out);
       recordToolUsage('dpi-converter').catch(() => {});
       addRecentFile({ toolId: 'dpi-converter', toolName: 'DPI Converter', fileName: guessFileName(`${dpi}dpi`, 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -117,7 +120,7 @@ export default function DpiConverterScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="printer" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Converting…' : `Convert to ${dpi} DPI`}
+            {processing ? `Converting… ${progress}%` : `Convert to ${dpi} DPI`}
           </Text>
         </TouchableOpacity>
       )}

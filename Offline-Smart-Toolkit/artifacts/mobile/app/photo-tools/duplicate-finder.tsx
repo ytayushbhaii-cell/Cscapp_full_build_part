@@ -91,7 +91,7 @@ export default function DuplicateFinderScreen() {
               onPress={scan} disabled={processing} activeOpacity={0.85}>
               {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="magnify-plus-outline" size={18} color="#fff" />}
               <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-                {processing ? `Scanning ${scanned}/${files.length}…` : `Scan ${files.length} Photos for Duplicates`}
+                {processing ? `Scanning ${scanned}/${files.length} — ${files.length > 0 ? Math.round((scanned / files.length) * 100) : 0}%` : `Scan ${files.length} Photos for Duplicates`}
               </Text>
             </TouchableOpacity>
           )}

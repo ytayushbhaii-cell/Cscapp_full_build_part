@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
@@ -23,16 +23,19 @@ export default function MirrorScreen() {
   const colors = useColors();
   const [image, setImage]   = useState<PickedImage | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]   = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const apply = async (dir: FlipType) => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(30);
       const out = await flipImage(image.uri, dir);
+      setProgress(100);
       setResult(out);
       recordToolUsage('mirror').catch(() => {});
       addRecentFile({ toolId: 'mirror', toolName: 'Mirror Tool', fileName: guessFileName('mirrored', 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -69,6 +72,7 @@ export default function MirrorScreen() {
               <TouchableOpacity key={m.id} style={[styles.labelBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 4 }]}
                 onPress={() => apply(m.dir)} disabled={processing} activeOpacity={0.85}>
                 {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name={m.icon as any} size={16} color="#fff" />}
+                {processing && <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 13 }}>{progress}%</Text>}
               </TouchableOpacity>
             ))}
           </View>

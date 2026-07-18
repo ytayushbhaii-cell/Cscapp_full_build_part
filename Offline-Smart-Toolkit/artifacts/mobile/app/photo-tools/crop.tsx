@@ -34,16 +34,18 @@ export default function CropScreen() {
   const [w, setW]             = useState('');
   const [h, setH]             = useState('');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string; width: number; height: number } | null>(null);
 
   const ratio = RATIOS.find((r) => r.id === ratioId)!;
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(20);
       let cropW: number, cropH: number;
       const cX = Math.max(0, Math.min(parseInt(x, 10) || 0, image.width - 1));
       const cY = Math.max(0, Math.min(parseInt(y, 10) || 0, image.height - 1));
@@ -67,10 +69,11 @@ export default function CropScreen() {
       cropW = Math.min(cropW, image.width - cX);
       cropH = Math.min(cropH, image.height - cY);
 
+      setProgress(60);
       const out = await manipulateAsync(image.uri,
         [{ crop: { originX: cX, originY: cY, width: cropW, height: cropH } }],
         { compress: 0.95, format: SaveFormat.JPEG });
-
+      setProgress(100);
       setResult({ uri: out.uri, width: cropW, height: cropH });
       recordToolUsage('photo-crop').catch(() => {});
       addRecentFile({ toolId: 'photo-crop', toolName: 'Photo Crop', fileName: guessFileName('cropped', 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -146,7 +149,7 @@ export default function CropScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="crop" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Cropping…' : 'Crop Photo'}
+            {processing ? `Cropping… ${progress}%` : 'Crop Photo'}
           </Text>
         </TouchableOpacity>
       )}

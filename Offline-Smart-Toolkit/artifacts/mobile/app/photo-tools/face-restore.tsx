@@ -31,17 +31,20 @@ export default function FaceRestoreScreen() {
   const [mode, setMode]       = useState<string>(MODES[0].id);
   const [strength, setStrength] = useState(70);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]     = useState<string | null>(null);
   const [result, setResult]   = useState<{ uri: string } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     const s = strength / 100;
     try {
+      setProgress(10);
       let rgba = await decodeToRGBA(image.uri);
+      setProgress(28);
 
       if (mode === 'enhance') {
         rgba = autoLevels(rgba);
@@ -62,7 +65,9 @@ export default function FaceRestoreScreen() {
         rgba = sharpenImage(rgba, Math.round(15 * s)); // restore a bit of sharpness to eyes/edges
       }
 
+      setProgress(85);
       const uri = await encodeRGBAToUri(rgba);
+      setProgress(100);
       setResult({ uri });
       recordToolUsage('face-restore').catch(() => {});
       addRecentFile({ toolId: 'face-restore', toolName: 'Face Restore', fileName: guessFileName('face-restored', 'png'), resultUri: uri }).catch(() => {});
@@ -124,7 +129,7 @@ export default function FaceRestoreScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="face-recognition" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Processing…' : 'Restore & Enhance'}
+            {processing ? `Processing… ${progress}%` : 'Restore & Enhance'}
           </Text>
         </TouchableOpacity>
       )}

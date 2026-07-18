@@ -33,20 +33,23 @@ export default function ResizeScreen() {
   const [customH, setCustomH]   = useState('768');
   const [keepAspect, setKeepAspect] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress]   = useState(0);
   const [error, setError]       = useState<string | null>(null);
   const [result, setResult]     = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
+  const reset = () => { setImage(null); setResult(null); setError(null); setProgress(0); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true); setError(null);
+    setProcessing(true); setError(null); setProgress(0);
     try {
+      setProgress(25);
       const preset = PRESETS.find((p) => p.id === presetId)!;
       const tW = preset.id === 'custom' ? parseInt(customW, 10) || image.width  : preset.w;
       const tH = preset.id === 'custom' ? parseInt(customH, 10) || image.height : preset.h;
       const size = keepAspect ? { width: tW } : { width: tW, height: tH };
       const out = await resizeImage(image.uri, size);
+      setProgress(100);
       setResult(out);
       recordToolUsage('image-resize').catch(() => {});
       addRecentFile({ toolId: 'image-resize', toolName: 'Photo Resize', fileName: guessFileName('resized', 'jpg'), resultUri: out.uri }).catch(() => {});
@@ -109,7 +112,7 @@ export default function ResizeScreen() {
           onPress={process} disabled={processing} activeOpacity={0.85}>
           {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="image-size-select-large" size={18} color="#fff" />}
           <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? 'Resizing…' : 'Resize Photo'}
+            {processing ? `Resizing… ${progress}%` : 'Resize Photo'}
           </Text>
         </TouchableOpacity>
       )}
