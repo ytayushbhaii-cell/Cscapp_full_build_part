@@ -14,6 +14,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { DrawerProvider } from '@/context/DrawerContext';
 import { AppProvider } from '@/context/AppContext';
+import { SettingsProvider } from '@/context/SettingsContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -48,11 +49,13 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <DrawerProvider>
-            <AppProvider>
-              <RootLayoutInner />
-            </AppProvider>
-          </DrawerProvider>
+          <SettingsProvider>
+            <DrawerProvider>
+              <AppProvider>
+                <RootLayoutInner />
+              </AppProvider>
+            </DrawerProvider>
+          </SettingsProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
