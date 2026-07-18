@@ -1,123 +1,121 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
+import { ProcessingSteps, makeSteps, updateStep } from '@/components/photo-tools/ProcessingSteps';
+import { AIModelBadge } from '@/components/photo-tools/AIModelBadge';
 import { blurBackground } from '@/lib/photoTools/segmentation';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
 const COLOR = '#6366F1';
-const TOOL_ID = 'blur-background';
 
-const BLUR_LEVELS = [
-  { id: 'light',  label: 'Light Blur',  desc: 'Subtle depth of field',  radius: 3,  icon: 'blur-linear' },
-  { id: 'medium', label: 'Medium Blur', desc: 'Natural portrait mode',  radius: 6,  icon: 'blur' },
-  { id: 'heavy',  label: 'Heavy Blur',  desc: 'Strong background focus', radius: 10, icon: 'blur-radial' },
+const LEVELS = [
+  { id: 'light',  label: 'Light',  desc: 'Subtle depth of field',   radius: 3,  icon: 'blur' },
+  { id: 'medium', label: 'Medium', desc: 'Natural portrait blur',    radius: 6,  icon: 'blur' },
+  { id: 'heavy',  label: 'Heavy',  desc: 'Strong background focus',  radius: 12, icon: 'blur' },
+];
+
+const STEPS = [
+  { id: 'decode',    label: 'Decoding full-resolution image' },
+  { id: 'segment',   label: 'AI subject segmentation' },
+  { id: 'matte',     label: 'Soft alpha matting — feathered edges' },
+  { id: 'blur',      label: 'Applying background blur' },
+  { id: 'composite', label: 'Compositing subject over blurred background' },
 ];
 
 export default function BlurBackgroundScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
+  const [image, setImage]   = useState<PickedImage | null>(null);
   const [levelId, setLevelId] = useState('medium');
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [steps, setSteps]   = useState(makeSteps(STEPS));
+  const [error, setError]   = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
-
-  const selectedLevel = BLUR_LEVELS.find((l) => l.id === levelId)!;
+  const level = LEVELS.find((l) => l.id === levelId)!;
+  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); };
+  const tick = (id: string, s: 'running' | 'done' | 'error', ms?: number) => setSteps((p) => updateStep(p, id, s, ms));
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true);
-    setError(null);
+    setProcessing(true); setError(null); setSteps(makeSteps(STEPS));
     try {
-      const out = await blurBackground(image.uri, selectedLevel.radius);
+      tick('decode',   'running'); await new Promise((r) => setTimeout(r, 20)); tick('decode',   'done', 0);
+      tick('segment',  'running');
+      const t = Date.now();
+      const out = await blurBackground(image.uri, level.radius);
+      tick('segment',  'done', Date.now() - t);
+      tick('matte',    'running'); await new Promise((r) => setTimeout(r, 10)); tick('matte',    'done', 0);
+      tick('blur',     'running'); await new Promise((r) => setTimeout(r, 10)); tick('blur',     'done', 0);
+      tick('composite','running'); await new Promise((r) => setTimeout(r, 10)); tick('composite','done', 0);
       setResult(out);
-      recordToolUsage(TOOL_ID).catch(() => {});
-      addRecentFile({ toolId: TOOL_ID, toolName: 'Blur Background', fileName: guessFileName('blur-bg', 'png'), resultUri: out.uri }).catch(() => {});
+      recordToolUsage('blur-background').catch(() => {});
+      addRecentFile({ toolId: 'blur-background', toolName: 'Blur Background', fileName: guessFileName('blur-bg', 'png'), resultUri: out.uri }).catch(() => {});
     } catch (e: any) {
+      tick('segment', 'error');
       setError(
         e?.message?.includes('fetch') || e?.message?.includes('network')
-          ? 'Segmentation model needs one internet connection the first time. Connect once and retry.'
-          : `Could not process: ${e?.message ?? 'unknown error'}`
+          ? 'Could not load AI model. Connect once to cache model weights, then use offline forever.'
+          : `Processing failed: ${e?.message ?? 'unknown error'}`
       );
-    } finally {
-      setProcessing(false);
-    }
+    } finally { setProcessing(false); }
   };
 
   return (
-    <ToolScreenLayout title="Blur Background" subtitle="Keep subject sharp, blur the background" iconName="blur" color={COLOR} onReset={reset}>
-      <StatusBanner type="info" message="Portrait-mode effect using on-device AI segmentation — no photo leaves your device." />
+    <ToolScreenLayout title="Blur Background" subtitle="Portrait-mode — keep subject sharp, blur background" iconName="blur" color={COLOR} onReset={reset}>
+
+      <View style={[styles.infoBanner, { backgroundColor: COLOR + '0D', borderColor: COLOR + '30', borderRadius: colors.radius }]}>
+        <MaterialCommunityIcons name="robot-outline" size={15} color={COLOR} />
+        <Text style={[styles.infoText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
+          Soft-alpha matting — subject edges feather naturally. Works offline after first model load.
+        </Text>
+      </View>
+      <AIModelBadge service="segmentation" showUpgradeHint />
+
       {error && <StatusBanner type="error" message={error} />}
+      {!result && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a portrait or subject photo" />}
 
       {!result && (
-        <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a portrait or subject photo" />
-      )}
-
-      {!result && image && (
         <>
-          <Text style={[styles.sectionLabel, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Blur Intensity</Text>
+          <Text style={[styles.label, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Blur intensity</Text>
           <View style={styles.levelRow}>
-            {BLUR_LEVELS.map((l) => {
-              const active = levelId === l.id;
+            {LEVELS.map((l) => {
+              const active = l.id === levelId;
               return (
-                <TouchableOpacity
-                  key={l.id}
-                  onPress={() => setLevelId(l.id)}
-                  style={[styles.levelCard, { borderColor: active ? COLOR : colors.border, backgroundColor: active ? COLOR + '12' : colors.card, borderRadius: colors.radius - 4 }]}
-                  activeOpacity={0.8}
-                >
-                  <MaterialCommunityIcons name={l.icon as any} size={24} color={active ? COLOR : colors.mutedForeground} />
+                <TouchableOpacity key={l.id} onPress={() => setLevelId(l.id)}
+                  style={[styles.levelCard, { borderColor: active ? COLOR : colors.border, backgroundColor: active ? COLOR + '10' : colors.card, borderRadius: colors.radius - 4 }]} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name={l.icon as any} size={20} color={active ? COLOR : colors.mutedForeground} />
                   <Text style={[styles.levelLabel, { color: active ? COLOR : colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{l.label}</Text>
-                  <Text style={[styles.levelDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{l.desc}</Text>
-                  <View style={[styles.radiusBadge, { backgroundColor: active ? COLOR + '20' : colors.border + '40' }]}>
-                    <Text style={[styles.radiusText, { color: active ? COLOR : colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>r={l.radius}</Text>
-                  </View>
+                  <Text style={[styles.levelDesc,  { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{l.desc}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-
-          <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <MaterialCommunityIcons name="information-outline" size={14} color={colors.mutedForeground} />
-            <Text style={[styles.infoText, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              Processing time depends on image size. Large photos may take 5–15 seconds on-device.
-            </Text>
-          </View>
-
-          <TouchableOpacity
-            style={[styles.processBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
-            onPress={process}
-            disabled={processing}
-            activeOpacity={0.85}
-          >
-            {processing ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <MaterialCommunityIcons name="blur" size={18} color="#fff" />
-            )}
-            <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Segmenting & blurring…' : `Apply ${selectedLevel.label}`}
-            </Text>
-          </TouchableOpacity>
         </>
       )}
 
-      {result && (
+      {!result && image && (
+        <TouchableOpacity style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+          onPress={process} disabled={processing} activeOpacity={0.85}>
+          {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="blur" size={18} color="#fff" />}
+          <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+            {processing ? 'Blurring background…' : `Apply ${level.label} Blur`}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {processing && <ProcessingSteps steps={steps} accentColor={COLOR} />}
+
+      {result && image && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: result.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              {result.width}×{result.height} · PNG · {selectedLevel.label}
-            </Text>
-          </View>
+          <BeforeAfterToggle beforeUri={image.uri} afterUri={result.uri} color={COLOR} />
           <ResultActions uri={result.uri} fileName={guessFileName('blur-bg', 'png')} color={COLOR} onReset={reset} />
         </>
       )}
@@ -126,18 +124,13 @@ export default function BlurBackgroundScreen() {
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: { fontSize: 13, marginTop: 4 },
+  infoBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1 },
+  infoText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  label: { fontSize: 13 },
   levelRow: { flexDirection: 'row', gap: 8 },
-  levelCard: { flex: 1, borderWidth: 1, padding: 12, gap: 4, alignItems: 'center' },
-  levelLabel: { fontSize: 12, textAlign: 'center' },
-  levelDesc: { fontSize: 10, textAlign: 'center', lineHeight: 13 },
-  radiusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, marginTop: 2 },
-  radiusText: { fontSize: 10 },
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, padding: 10 },
-  infoText: { fontSize: 12, flex: 1, lineHeight: 17 },
-  processBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText: { fontSize: 14 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  levelCard: { flex: 1, borderWidth: 1.5, padding: 10, gap: 4, alignItems: 'center' },
+  levelLabel: { fontSize: 12 },
+  levelDesc: { fontSize: 10, textAlign: 'center', lineHeight: 14 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  btnText: { fontSize: 14 },
 });

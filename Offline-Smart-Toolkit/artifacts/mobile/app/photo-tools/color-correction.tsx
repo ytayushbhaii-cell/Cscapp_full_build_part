@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
@@ -7,173 +7,135 @@ import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
-import { decodeToRGBA, encodeRGBAToUri, adjustImage, gammaCorrect } from '@/lib/photoTools/pixelOps';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
+import {
+  decodeToRGBA, encodeRGBAToUri, gammaCorrect, hslAdjust,
+  adjustImage, vibrance, autoLevels, autoWhiteBalance,
+} from '@/lib/photoTools/pixelOps';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
 const COLOR = '#F97316';
-const TOOL_ID = 'color-correction';
 
-interface SliderRowProps {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (v: number) => void;
-  unit?: string;
-}
-
-function SliderRow({ label, value, min, max, step = 1, onChange, unit = '' }: SliderRowProps) {
+function Row({ label, value, min = -100, max = 100, step = 1, onChange, hint }: {
+  label: string; value: number; min?: number; max?: number; step?: number;
+  onChange: (v: number) => void; hint?: string;
+}) {
   const colors = useColors();
   return (
     <View style={styles.sliderBlock}>
       <View style={styles.sliderHeader}>
         <Text style={[styles.sliderLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>{label}</Text>
-        <Text style={[styles.sliderValue, { color: COLOR, fontFamily: 'Inter_700Bold' }]}>
-          {typeof value === 'number' && !Number.isInteger(value) ? value.toFixed(1) : value}{unit}
-        </Text>
+        <Text style={[styles.sliderVal,   { color: COLOR, fontFamily: 'Inter_700Bold' }]}>{value}</Text>
       </View>
-      <Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange} minimumTrackTintColor={COLOR} maximumTrackTintColor={colors.border} thumbTintColor={COLOR} />
+      <Slider minimumValue={min} maximumValue={max} step={step} value={value} onValueChange={onChange}
+        minimumTrackTintColor={COLOR} maximumTrackTintColor={colors.border} thumbTintColor={COLOR} />
+      {hint && <Text style={[styles.hint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{hint}</Text>}
     </View>
   );
 }
 
 export default function ColorCorrectionScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
-  // Gamma: 0.5 (dark) … 1.0 (normal) … 2.5 (bright)
-  const [gamma, setGamma] = useState(1.0);
-  // Temperature: -100 (cool) … 0 … +100 (warm)
-  const [temperature, setTemperature] = useState(0);
-  // Highlights/Shadows
-  const [highlights, setHighlights] = useState(0);
-  const [shadows, setShadows] = useState(0);
-  // Tint (green–magenta): -100 … 0 … +100
-  const [tint, setTint] = useState(0);
-  // Vibrance: like saturation but only boosts unsaturated colors
-  const [vibrance, setVibrance] = useState(0);
-
+  const [image, setImage]     = useState<PickedImage | null>(null);
+  const [gamma, setGamma]     = useState(100);    // 50–200 maps to 0.5–2.0
+  const [temp, setTemp]       = useState(0);
+  const [tint, setTint]       = useState(0);
+  const [hi, setHi]           = useState(0);
+  const [sh, setSh]           = useState(0);
+  const [hue, setHue]         = useState(0);
+  const [sat, setSat]         = useState(0);
+  const [vibranceV, setVibranceV] = useState(0);
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [result, setResult]   = useState<{ uri: string } | null>(null);
 
-  const reset = () => {
-    setImage(null); setResult(null); setError(null);
-    setGamma(1.0); setTemperature(0); setHighlights(0); setShadows(0); setTint(0); setVibrance(0);
+  const reset = () => { setImage(null); setResult(null); setError(null); setGamma(100); setTemp(0); setTint(0); setHi(0); setSh(0); setHue(0); setSat(0); setVibranceV(0); };
+
+  const autoFix = async () => {
+    if (!image) return;
+    setProcessing(true); setError(null);
+    try {
+      let rgba = await decodeToRGBA(image.uri);
+      rgba = autoLevels(rgba);
+      rgba = autoWhiteBalance(rgba);
+      rgba = vibrance(rgba, 15);
+      const uri = await encodeRGBAToUri(rgba);
+      setResult({ uri });
+      recordToolUsage('color-correction').catch(() => {});
+      addRecentFile({ toolId: 'color-correction', toolName: 'Color Correction', fileName: guessFileName('color-corrected', 'png'), resultUri: uri }).catch(() => {});
+    } catch (e: any) { setError(`Auto correction failed: ${e?.message ?? 'unknown'}`); }
+    finally { setProcessing(false); }
   };
-
-  const isDefaultSettings = gamma === 1.0 && temperature === 0 && highlights === 0 && shadows === 0 && tint === 0 && vibrance === 0;
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true);
-    setError(null);
+    setProcessing(true); setError(null);
     try {
       let rgba = await decodeToRGBA(image.uri);
-
-      // Apply gamma
-      if (gamma !== 1.0) {
-        rgba = gammaCorrect(rgba, gamma);
-      }
-
-      // Apply temperature, highlights, shadows via adjustImage
-      // Tint shifts green (+) / magenta (-) channel
-      if (temperature !== 0 || highlights !== 0 || shadows !== 0 || tint !== 0 || vibrance !== 0) {
-        rgba = adjustImage(rgba, {
-          temperature,
-          highlights,
-          shadows,
-          // vibrance approximated as mild saturation boost on less-saturated pixels
-          saturation: vibrance * 0.4,
-        });
-
-        // Tint: shift green channel (green/magenta axis)
-        if (tint !== 0) {
-          const tintFactor = (tint / 100) * 30;
-          const px = rgba.pixels;
-          for (let i = 0; i < px.length; i += 4) {
-            px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + tintFactor));
-          }
-        }
-      }
-
+      if (gamma !== 100) rgba = gammaCorrect(rgba, gamma / 100);
+      rgba = adjustImage(rgba, { temperature: temp, tint, highlights: hi, shadows: sh });
+      if (hue !== 0 || sat !== 0) rgba = hslAdjust(rgba, hue, sat, 0);
+      if (vibranceV !== 0) rgba = vibrance(rgba, vibranceV);
       const uri = await encodeRGBAToUri(rgba);
-      const out = { uri, width: rgba.width, height: rgba.height };
-      setResult(out);
-      recordToolUsage(TOOL_ID).catch(() => {});
-      addRecentFile({ toolId: TOOL_ID, toolName: 'Color Correction', fileName: guessFileName('color-corrected', 'png'), resultUri: out.uri }).catch(() => {});
-    } catch (e: any) {
-      setError(`Could not process this photo: ${e?.message ?? 'unknown error'}`);
-    } finally {
-      setProcessing(false);
-    }
+      setResult({ uri });
+      recordToolUsage('color-correction').catch(() => {});
+      addRecentFile({ toolId: 'color-correction', toolName: 'Color Correction', fileName: guessFileName('color-corrected', 'png'), resultUri: uri }).catch(() => {});
+    } catch (e: any) { setError(`Correction failed: ${e?.message ?? 'unknown error'}`); }
+    finally { setProcessing(false); }
   };
 
   return (
-    <ToolScreenLayout title="Color Correction" subtitle="Gamma, white balance, shadows & highlights" iconName="palette" color={COLOR} onReset={reset}>
+    <ToolScreenLayout title="Color Correction" subtitle="Gamma · white balance · HSL · vibrance" iconName="palette" color={COLOR} onReset={reset}>
       {error && <StatusBanner type="error" message={error} />}
       {!result && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} />}
 
       {!result && image && (
         <>
-          {/* White Balance section */}
+          {/* Auto white balance */}
+          <TouchableOpacity style={[styles.autoBtn, { backgroundColor: COLOR + '15', borderColor: COLOR + '40', borderRadius: colors.radius - 4 }]}
+            onPress={autoFix} disabled={processing} activeOpacity={0.8}>
+            <MaterialCommunityIcons name="auto-fix" size={15} color={COLOR} />
+            <Text style={[styles.autoBtnText, { color: COLOR, fontFamily: 'Inter_600SemiBold' }]}>Auto Correct (Auto Levels + Auto WB)</Text>
+          </TouchableOpacity>
+
+          {/* Tone */}
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="white-balance-sunny" size={16} color={COLOR} />
-              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>White Balance</Text>
-            </View>
-            <SliderRow label="Temperature" value={temperature} min={-100} max={100} onChange={setTemperature} unit="" />
-            <Text style={[styles.axisHint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>← Cool (blue)  ·  Warm (amber) →</Text>
-            <SliderRow label="Tint" value={tint} min={-100} max={100} onChange={setTint} />
-            <Text style={[styles.axisHint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>← Magenta  ·  Green →</Text>
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Tone</Text>
+            <Row label="Gamma"      value={gamma}  min={50} max={200} step={5} onChange={setGamma} hint="100 = no change. Higher = brighter midtones." />
+            <Row label="Highlights" value={hi}     onChange={setHi} />
+            <Row label="Shadows"    value={sh}     onChange={setSh} />
           </View>
 
-          {/* Tone section */}
+          {/* White Balance */}
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="tune-variant" size={16} color={COLOR} />
-              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Tone</Text>
-            </View>
-            <SliderRow label="Gamma" value={gamma} min={0.5} max={2.5} step={0.05} onChange={(v) => setGamma(parseFloat(v.toFixed(2)))} />
-            <Text style={[styles.axisHint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>← Darker midtones  ·  Brighter midtones →</Text>
-            <SliderRow label="Highlights" value={highlights} min={-100} max={100} onChange={setHighlights} />
-            <SliderRow label="Shadows" value={shadows} min={-100} max={100} onChange={setShadows} />
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>White Balance</Text>
+            <Row label="Temperature" value={temp} onChange={setTemp} hint="← Cool (blue) · Warm (amber) →" />
+            <Row label="Tint"        value={tint} onChange={setTint} hint="← Green · Magenta →" />
           </View>
 
-          {/* Color section */}
+          {/* HSL */}
           <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-            <View style={styles.sectionHeader}>
-              <MaterialCommunityIcons name="palette-outline" size={16} color={COLOR} />
-              <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Color</Text>
-            </View>
-            <SliderRow label="Vibrance" value={vibrance} min={-100} max={100} onChange={setVibrance} />
-            <Text style={[styles.axisHint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>Boosts muted colors without oversaturating already-vivid ones</Text>
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>HSL</Text>
+            <Row label="Hue Shift"   value={hue}      min={-180} max={180} step={5}  onChange={setHue} />
+            <Row label="Saturation"  value={sat}      onChange={setSat} />
+            <Row label="Vibrance"    value={vibranceV} onChange={setVibranceV} hint="Selective saturation — boosts dull colours, protects skin tones" />
           </View>
 
-          <TouchableOpacity
-            style={[styles.processBtn, { backgroundColor: isDefaultSettings ? colors.border : COLOR, borderRadius: colors.radius - 2 }]}
-            onPress={process}
-            disabled={processing || isDefaultSettings}
-            activeOpacity={0.85}
-          >
+          <TouchableOpacity style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+            onPress={process} disabled={processing} activeOpacity={0.85}>
             {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="palette" size={18} color="#fff" />}
-            <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Applying corrections…' : isDefaultSettings ? 'Adjust sliders above' : 'Apply Color Correction'}
+            <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+              {processing ? 'Applying…' : 'Apply Correction'}
             </Text>
           </TouchableOpacity>
         </>
       )}
 
-      {result && (
+      {result && image && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: result.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              {result.width}×{result.height} · PNG
-            </Text>
-          </View>
+          <BeforeAfterToggle beforeUri={image.uri} afterUri={result.uri} color={COLOR} />
           <ResultActions uri={result.uri} fileName={guessFileName('color-corrected', 'png')} color={COLOR} onReset={reset} />
         </>
       )}
@@ -182,17 +144,15 @@ export default function ColorCorrectionScreen() {
 }
 
 const styles = StyleSheet.create({
+  autoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, paddingVertical: 10 },
+  autoBtnText: { fontSize: 13 },
   section: { borderWidth: 1, padding: 14, gap: 8 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  sectionTitle: { fontSize: 13 },
+  sectionTitle: { fontSize: 13, marginBottom: 2 },
   sliderBlock: { gap: 2 },
   sliderHeader: { flexDirection: 'row', justifyContent: 'space-between' },
   sliderLabel: { fontSize: 13 },
-  sliderValue: { fontSize: 13 },
-  axisHint: { fontSize: 10, marginTop: -4 },
-  processBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText: { fontSize: 14 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  sliderVal: { fontSize: 13 },
+  hint: { fontSize: 10, marginTop: -4 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  btnText: { fontSize: 14 },
 });

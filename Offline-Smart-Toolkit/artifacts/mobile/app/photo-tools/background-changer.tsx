@@ -1,173 +1,128 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, TextInput, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, TextInput } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
+import { ProcessingSteps, makeSteps, updateStep } from '@/components/photo-tools/ProcessingSteps';
+import { AIModelBadge } from '@/components/photo-tools/AIModelBadge';
 import { removeBackground } from '@/lib/photoTools/segmentation';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
-const COLOR = '#0D9488';
-const TOOL_ID = 'background-changer';
+const COLOR = '#8B5CF6';
 
-const PRESETS = [
-  { id: 'white',   label: 'White',        hex: '#FFFFFF' },
-  { id: 'blue',    label: 'Passport Blue', hex: '#003399' },
-  { id: 'red',     label: 'Visa Red',     hex: '#B22222' },
-  { id: 'green',   label: 'Green',        hex: '#228B22' },
-  { id: 'black',   label: 'Black',        hex: '#000000' },
-  { id: 'yellow',  label: 'Yellow',       hex: '#FFD700' },
-  { id: 'grey',    label: 'Grey',         hex: '#808080' },
-  { id: 'navy',    label: 'Navy',         hex: '#001F5B' },
-  { id: 'custom',  label: 'Custom',       hex: '' },
+const SWATCHES = [
+  { label: 'White',        hex: '#FFFFFF', rgb: [255, 255, 255] as [number,number,number] },
+  { label: 'Light Gray',   hex: '#F3F4F6', rgb: [243, 244, 246] as [number,number,number] },
+  { label: 'Cream',        hex: '#FEF3C7', rgb: [254, 243, 199] as [number,number,number] },
+  { label: 'Sky Blue',     hex: '#DBEAFE', rgb: [219, 234, 254] as [number,number,number] },
+  { label: 'ID Blue',      hex: '#003399', rgb: [0,   51,  153] as [number,number,number] },
+  { label: 'Passport Red', hex: '#B22222', rgb: [178, 34,   34] as [number,number,number] },
+  { label: 'Forest Green', hex: '#065F46', rgb: [6,   95,   70] as [number,number,number] },
+  { label: 'Charcoal',     hex: '#1F2937', rgb: [31,  41,   55] as [number,number,number] },
 ];
 
 function hexToRgb(hex: string): [number, number, number] | null {
-  const clean = hex.replace('#', '');
-  if (clean.length !== 6) return null;
-  const r = parseInt(clean.slice(0, 2), 16);
-  const g = parseInt(clean.slice(2, 4), 16);
-  const b = parseInt(clean.slice(4, 6), 16);
-  if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
-  return [r, g, b];
+  const m = hex.replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : null;
 }
+
+const STEPS = [
+  { id: 'segment',   label: 'AI subject detection + soft-edge matting' },
+  { id: 'composite', label: 'Compositing new background' },
+];
 
 export default function BackgroundChangerScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
-  const [selectedPreset, setSelectedPreset] = useState('white');
-  const [customHex, setCustomHex] = useState('#FF6B35');
+  const [image, setImage]    = useState<PickedImage | null>(null);
+  const [selected, setSelected] = useState(SWATCHES[0]);
+  const [customHex, setCustomHex] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [steps, setSteps]    = useState(makeSteps(STEPS));
+  const [error, setError]    = useState<string | null>(null);
+  const [result, setResult]  = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => { setImage(null); setResult(null); setError(null); };
-
-  const activeHex = selectedPreset === 'custom' ? customHex : PRESETS.find((p) => p.id === selectedPreset)?.hex ?? '#FFFFFF';
-  const rgb = hexToRgb(activeHex);
+  const reset = () => { setImage(null); setResult(null); setError(null); setSteps(makeSteps(STEPS)); };
+  const tick = (id: string, s: 'running' | 'done' | 'error', ms?: number) => setSteps((p) => updateStep(p, id, s, ms));
 
   const process = async () => {
     if (!image) return;
-    if (!rgb) { setError('Enter a valid hex color (e.g. #FF6B35)'); return; }
-    setProcessing(true);
-    setError(null);
+    const rgb = customHex.length >= 6 ? hexToRgb(customHex) : selected.rgb;
+    if (!rgb) { setError('Invalid hex colour code.'); return; }
+    setProcessing(true); setError(null); setSteps(makeSteps(STEPS));
     try {
+      tick('segment', 'running');
+      const t = Date.now();
       const out = await removeBackground(image.uri, 'custom', rgb);
+      tick('segment', 'done', Date.now() - t);
+      tick('composite', 'running'); await new Promise((r) => setTimeout(r, 10)); tick('composite', 'done', 0);
       setResult(out);
-      recordToolUsage(TOOL_ID).catch(() => {});
-      addRecentFile({ toolId: TOOL_ID, toolName: 'Background Changer', fileName: guessFileName('bg-changed', 'png'), resultUri: out.uri }).catch(() => {});
+      recordToolUsage('bg-changer').catch(() => {});
+      addRecentFile({ toolId: 'bg-changer', toolName: 'Background Changer', fileName: guessFileName('new-bg', 'png'), resultUri: out.uri }).catch(() => {});
     } catch (e: any) {
-      setError(
-        e?.message?.includes('fetch') || e?.message?.includes('network')
-          ? 'Segmentation model needs one internet connection the first time. Connect once and retry.'
-          : `Could not process: ${e?.message ?? 'unknown error'}`
-      );
-    } finally {
-      setProcessing(false);
-    }
+      tick('segment', 'error');
+      setError(e?.message?.includes('fetch') || e?.message?.includes('network')
+        ? 'Could not load AI model — needs internet once to cache model weights.'
+        : `Processing failed: ${e?.message ?? 'unknown error'}`);
+    } finally { setProcessing(false); }
   };
 
   return (
-    <ToolScreenLayout title="Background Changer" subtitle="Replace background with any color" iconName="palette-outline" color={COLOR} onReset={reset}>
-      <StatusBanner type="info" message="On-device AI segmentation — no photo leaves your device." />
+    <ToolScreenLayout title="Background Changer" subtitle="Replace background with any colour — soft-edge matting" iconName="palette-swatch" color={COLOR} onReset={reset}>
+      <AIModelBadge service="segmentation" showUpgradeHint />
       {error && <StatusBanner type="error" message={error} />}
+      {!result && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a photo with a clear subject" />}
 
       {!result && (
-        <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a photo with a clear subject" />
-      )}
-
-      {!result && image && (
         <>
-          <Text style={[styles.sectionLabel, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Choose Background Color</Text>
-
-          {/* Preset swatches */}
+          <Text style={[styles.label, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Background colour</Text>
           <View style={styles.swatchGrid}>
-            {PRESETS.map((p) => {
-              const active = selectedPreset === p.id;
-              const showHex = p.id !== 'custom' ? p.hex : activeHex;
+            {SWATCHES.map((sw) => {
+              const active = selected.hex === sw.hex && !customHex;
               return (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => setSelectedPreset(p.id)}
-                  style={[styles.swatchCard, { borderColor: active ? COLOR : colors.border, backgroundColor: active ? COLOR + '10' : colors.card, borderRadius: colors.radius - 6 }]}
-                  activeOpacity={0.8}
-                >
-                  <View style={[
-                    styles.swatch,
-                    {
-                      backgroundColor: p.id === 'custom' ? (rgb ? activeHex : '#cccccc') : p.hex,
-                      borderColor: colors.border,
-                      borderRadius: 6,
-                    },
-                  ]}>
-                    {p.id === 'custom' && !rgb && (
-                      <MaterialCommunityIcons name="palette" size={10} color="#fff" />
-                    )}
-                  </View>
-                  <Text style={[styles.swatchLabel, { color: active ? COLOR : colors.foreground, fontFamily: active ? 'Inter_600SemiBold' : 'Inter_400Regular' }]}>
-                    {p.label}
-                  </Text>
-                </TouchableOpacity>
+                <TouchableOpacity key={sw.hex} onPress={() => { setSelected(sw); setCustomHex(''); }}
+                  style={[styles.swatch, { backgroundColor: sw.hex, borderColor: active ? COLOR : colors.border, borderWidth: active ? 2.5 : 1 }]} activeOpacity={0.8} />
               );
             })}
           </View>
 
-          {/* Custom hex input */}
-          {selectedPreset === 'custom' && (
-            <View style={[styles.hexRow, { backgroundColor: colors.card, borderColor: rgb ? COLOR : colors.border, borderRadius: colors.radius - 4 }]}>
-              <View style={[styles.hexPreview, { backgroundColor: rgb ? activeHex : '#cccccc', borderRadius: 6 }]} />
-              <Text style={[styles.hexHash, { color: colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>#</Text>
-              <TextInput
-                style={[styles.hexInput, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}
-                value={customHex.replace('#', '')}
-                onChangeText={(t) => setCustomHex('#' + t.replace(/[^0-9A-Fa-f]/g, '').slice(0, 6))}
-                placeholder="FF6B35"
-                placeholderTextColor={colors.mutedForeground}
-                maxLength={6}
-                autoCapitalize="characters"
-              />
-              {rgb && <MaterialCommunityIcons name="check-circle" size={16} color={COLOR} />}
-            </View>
-          )}
-
-          {/* Active color preview */}
-          <View style={[styles.previewRow, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]}>
-            <View style={[styles.colorPreview, { backgroundColor: rgb ? activeHex : '#ccc', borderRadius: 6 }]} />
-            <Text style={[styles.previewLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
-              Selected: {activeHex.toUpperCase()}
-            </Text>
-            {!rgb && selectedPreset === 'custom' && (
-              <Text style={[styles.invalidHex, { color: '#EF4444', fontFamily: 'Inter_400Regular' }]}>Invalid hex</Text>
+          {/* Custom hex */}
+          <View style={[styles.hexRow, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: colors.radius - 4 }]}>
+            <Text style={[styles.hexHash, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>#</Text>
+            <TextInput
+              style={[styles.hexInput, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}
+              value={customHex} onChangeText={setCustomHex}
+              placeholder="Custom hex (e.g. FF5733)" placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="characters" maxLength={6}
+            />
+            {customHex.length === 6 && hexToRgb(customHex) && (
+              <View style={[styles.hexPreview, { backgroundColor: `#${customHex}` }]} />
             )}
           </View>
-
-          <TouchableOpacity
-            style={[styles.processBtn, { backgroundColor: rgb ? COLOR : colors.border, borderRadius: colors.radius - 2 }]}
-            onPress={process}
-            disabled={processing || !rgb}
-            activeOpacity={0.85}
-          >
-            {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="swap-horizontal" size={18} color="#fff" />}
-            <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-              {processing ? 'Processing on-device…' : 'Change Background'}
-            </Text>
-          </TouchableOpacity>
         </>
       )}
 
-      {result && (
+      {!result && image && (
+        <TouchableOpacity style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+          onPress={process} disabled={processing} activeOpacity={0.85}>
+          {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="swap-horizontal" size={18} color="#fff" />}
+          <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+            {processing ? 'Changing background…' : 'Change Background'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {processing && <ProcessingSteps steps={steps} accentColor={COLOR} />}
+
+      {result && image && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: result.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              {result.width}×{result.height} · PNG · {activeHex.toUpperCase()} background
-            </Text>
-          </View>
-          <ResultActions uri={result.uri} fileName={guessFileName('bg-changed', 'png')} color={COLOR} onReset={reset} />
+          <BeforeAfterToggle beforeUri={image.uri} afterUri={result.uri} color={COLOR} />
+          <ResultActions uri={result.uri} fileName={guessFileName('new-bg', 'png')} color={COLOR} onReset={reset} />
         </>
       )}
     </ToolScreenLayout>
@@ -175,22 +130,13 @@ export default function BackgroundChangerScreen() {
 }
 
 const styles = StyleSheet.create({
-  sectionLabel: { fontSize: 13, marginTop: 4 },
-  swatchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  swatchCard: { width: '22%', borderWidth: 1, padding: 8, alignItems: 'center', gap: 5 },
-  swatch: { width: 32, height: 32, borderWidth: 1 },
-  swatchLabel: { fontSize: 10, textAlign: 'center' },
-  hexRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1.5, paddingHorizontal: 12, paddingVertical: 10 },
-  hexPreview: { width: 22, height: 22, borderWidth: 0.5, borderColor: '#0002' },
-  hexHash: { fontSize: 15 },
-  hexInput: { flex: 1, fontSize: 15, padding: 0 },
-  previewRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, padding: 10 },
-  colorPreview: { width: 28, height: 28, borderWidth: 0.5, borderColor: '#0002' },
-  previewLabel: { flex: 1, fontSize: 13 },
-  invalidHex: { fontSize: 11 },
-  processBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText: { fontSize: 14 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  label: { fontSize: 13 },
+  swatchGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  swatch: { width: 44, height: 44, borderRadius: 8 },
+  hexRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, gap: 4 },
+  hexHash: { fontSize: 14 },
+  hexInput: { flex: 1, fontSize: 14 },
+  hexPreview: { width: 24, height: 24, borderRadius: 6 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  btnText: { fontSize: 14 },
 });

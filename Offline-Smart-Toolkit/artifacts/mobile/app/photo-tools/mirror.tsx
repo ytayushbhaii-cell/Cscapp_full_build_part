@@ -1,85 +1,83 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
 import { flipImage, FlipType } from '@/lib/photoTools/imageOps';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
-const COLOR = '#14B8A6';
+const COLOR = '#0EA5E9';
+
+const MODES = [
+  { id: 'horizontal', label: 'Mirror Horizontal', icon: 'flip-horizontal', dir: FlipType.Horizontal },
+  { id: 'vertical',   label: 'Mirror Vertical',   icon: 'flip-vertical',   dir: FlipType.Vertical   },
+];
 
 export default function MirrorScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
-  const [direction, setDirection] = useState<FlipType>(FlipType.Horizontal);
+  const [image, setImage]   = useState<PickedImage | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]   = useState<string | null>(null);
   const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
 
-  const reset = () => {
-    setImage(null);
-    setResult(null);
-    setError(null);
-  };
+  const reset = () => { setImage(null); setResult(null); setError(null); };
 
-  const process = async () => {
+  const apply = async (dir: FlipType) => {
     if (!image) return;
-    setProcessing(true);
-    setError(null);
+    setProcessing(true); setError(null);
     try {
-      const out = await flipImage(image.uri, direction);
+      const out = await flipImage(image.uri, dir);
       setResult(out);
-      recordToolUsage('mirror-tool').catch(() => {});
-      addRecentFile({ toolId: 'mirror-tool', toolName: 'Mirror Tool', fileName: guessFileName('mirrored', 'jpg'), resultUri: out.uri }).catch(() => {});
+      recordToolUsage('mirror').catch(() => {});
+      addRecentFile({ toolId: 'mirror', toolName: 'Mirror Tool', fileName: guessFileName('mirrored', 'jpg'), resultUri: out.uri }).catch(() => {});
     } catch (e: any) {
-      setError(`Could not mirror this photo: ${e?.message ?? 'unknown error'}`);
-    } finally {
-      setProcessing(false);
-    }
+      setError(`Mirror failed: ${e?.message ?? 'unknown error'}`);
+    } finally { setProcessing(false); }
   };
 
   return (
-    <ToolScreenLayout title="Mirror Tool" subtitle="Mirror an image horizontally or vertically" iconName="flip-horizontal" color={COLOR} onReset={reset}>
+    <ToolScreenLayout title="Mirror Tool" subtitle="Flip image horizontally or vertically" iconName="flip-horizontal" color={COLOR} onReset={reset}>
       {error && <StatusBanner type="error" message={error} />}
       {!result && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} />}
 
-      {!result && image && (
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[styles.chip, { borderColor: direction === FlipType.Horizontal ? COLOR : colors.border, backgroundColor: direction === FlipType.Horizontal ? COLOR + '14' : colors.card, borderRadius: colors.radius - 4 }]}
-            onPress={() => setDirection(FlipType.Horizontal)}
-          >
-            <MaterialCommunityIcons name="flip-horizontal" size={18} color={direction === FlipType.Horizontal ? COLOR : colors.foreground} />
-            <Text style={[styles.chipText, { color: direction === FlipType.Horizontal ? COLOR : colors.foreground, fontFamily: 'Inter_500Medium' }]}>Horizontal</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.chip, { borderColor: direction === FlipType.Vertical ? COLOR : colors.border, backgroundColor: direction === FlipType.Vertical ? COLOR + '14' : colors.card, borderRadius: colors.radius - 4 }]}
-            onPress={() => setDirection(FlipType.Vertical)}
-          >
-            <MaterialCommunityIcons name="flip-vertical" size={18} color={direction === FlipType.Vertical ? COLOR : colors.foreground} />
-            <Text style={[styles.chipText, { color: direction === FlipType.Vertical ? COLOR : colors.foreground, fontFamily: 'Inter_500Medium' }]}>Vertical</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {!result && image && (
-        <TouchableOpacity style={[styles.processBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]} onPress={process} disabled={processing} activeOpacity={0.85}>
-          {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="flip-horizontal" size={18} color="#fff" />}
-          <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>{processing ? 'Mirroring…' : 'Mirror Photo'}</Text>
-        </TouchableOpacity>
-      )}
-
-      {result && (
+      {image && !result && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: result.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{result.width}×{result.height}</Text>
+          {/* Preview */}
+          <View style={[styles.preview, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
+            <Image source={{ uri: image.uri }} style={[styles.previewImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
           </View>
+
+          {/* Action buttons */}
+          <View style={styles.btnRow}>
+            {MODES.map((m) => (
+              <TouchableOpacity key={m.id} style={[styles.modeBtn, { backgroundColor: COLOR + '14', borderColor: COLOR + '40', borderRadius: colors.radius - 4 }]}
+                onPress={() => apply(m.dir)} disabled={processing} activeOpacity={0.85}>
+                <MaterialCommunityIcons name={m.icon as any} size={28} color={COLOR} />
+                <MaterialCommunityIcons name="arrow-right" size={14} color={colors.mutedForeground} />
+                <MaterialCommunityIcons name={m.dir === FlipType.Horizontal ? 'flip-horizontal' : 'flip-vertical'} size={28} color={COLOR} style={{ opacity: 0.5 }} />
+              </TouchableOpacity>
+            ))}
+          </View>
+          <View style={styles.labelRow}>
+            {MODES.map((m) => (
+              <TouchableOpacity key={m.id} style={[styles.labelBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 4 }]}
+                onPress={() => apply(m.dir)} disabled={processing} activeOpacity={0.85}>
+                {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name={m.icon as any} size={16} color="#fff" />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      )}
+
+      {result && image && (
+        <>
+          <BeforeAfterToggle beforeUri={image.uri} afterUri={result.uri} color={COLOR} />
           <ResultActions uri={result.uri} fileName={guessFileName('mirrored', 'jpg')} color={COLOR} onReset={reset} />
         </>
       )}
@@ -88,12 +86,10 @@ export default function MirrorScreen() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 10 },
-  chip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderWidth: 1 },
-  chipText: { fontSize: 13 },
-  processBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText: { fontSize: 14 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  preview: { borderWidth: 1, padding: 8 },
+  previewImg: { width: '100%', height: 240, backgroundColor: '#00000006' },
+  btnRow: { flexDirection: 'row', gap: 12 },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1.5, paddingVertical: 16 },
+  labelRow: { flexDirection: 'row', gap: 12 },
+  labelBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
 });

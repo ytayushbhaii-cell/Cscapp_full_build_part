@@ -6,103 +6,95 @@ import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
 import { rotateImage, flipImage, FlipType } from '@/lib/photoTools/imageOps';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
-const COLOR = '#22C55E';
+const COLOR = '#14B8A6';
 
 export default function RotateFlipScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
-  const [current, setCurrent] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [image, setImage]       = useState<PickedImage | null>(null);
+  const [current, setCurrent]   = useState<{ uri: string; width: number; height: number } | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]       = useState<string | null>(null);
+  const [originalUri, setOriginalUri] = useState<string | null>(null);
 
-  const active = current ?? image;
+  const reset = () => { setImage(null); setCurrent(null); setError(null); setOriginalUri(null); };
 
-  const reset = () => {
-    setImage(null);
-    setCurrent(null);
-    setError(null);
-  };
-
-  const applyRotate = async (degrees: number) => {
-    if (!active) return;
-    setProcessing(true);
-    setError(null);
+  const applyOp = async (op: () => Promise<{ uri: string; width: number; height: number }>) => {
+    const src = current ?? image;
+    if (!src) return;
+    setProcessing(true); setError(null);
     try {
-      const out = await rotateImage(active.uri, degrees);
+      if (!originalUri) setOriginalUri(image?.uri ?? null);
+      const out = await op();
       setCurrent(out);
+      recordToolUsage('rotate-flip').catch(() => {});
+      addRecentFile({ toolId: 'rotate-flip', toolName: 'Rotate & Flip', fileName: guessFileName('rotated', 'jpg'), resultUri: out.uri }).catch(() => {});
     } catch (e: any) {
-      setError(`Could not rotate this photo: ${e?.message ?? 'unknown error'}`);
-    } finally {
-      setProcessing(false);
-    }
+      setError(`Operation failed: ${e?.message ?? 'unknown error'}`);
+    } finally { setProcessing(false); }
   };
 
-  const applyFlip = async (direction: FlipType) => {
-    if (!active) return;
-    setProcessing(true);
-    setError(null);
-    try {
-      const out = await flipImage(active.uri, direction);
-      setCurrent(out);
-    } catch (e: any) {
-      setError(`Could not flip this photo: ${e?.message ?? 'unknown error'}`);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const save = () => {
-    if (!current) return;
-    recordToolUsage('rotate-flip').catch(() => {});
-    addRecentFile({ toolId: 'rotate-flip', toolName: 'Rotate & Flip', fileName: guessFileName('rotated', 'jpg'), resultUri: current.uri }).catch(() => {});
-  };
+  const applyRotate = (deg: number) => applyOp(() => rotateImage((current ?? image)!.uri, deg));
+  const applyFlip   = (dir: FlipType) => applyOp(() => flipImage((current ?? image)!.uri, dir));
 
   return (
-    <ToolScreenLayout title="Rotate & Flip" subtitle="Rotate by 90°/180° or flip horizontally & vertically" iconName="rotate-right" color={COLOR} onReset={reset}>
+    <ToolScreenLayout title="Rotate & Flip" subtitle="Rotate by any angle · flip horizontal or vertical" iconName="rotate-right" color={COLOR} onReset={reset}>
       {error && <StatusBanner type="error" message={error} />}
-      <ImageUploadWidget image={image ? { ...image, uri: active?.uri ?? image.uri } : null} onPicked={setImage} onError={setError} color={COLOR} />
+
+      {!image && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} />}
 
       {image && (
         <>
-          <View style={styles.row}>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]} onPress={() => applyRotate(-90)} disabled={processing}>
-              <MaterialCommunityIcons name="rotate-left" size={20} color={colors.foreground} />
-              <Text style={[styles.actionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>-90°</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]} onPress={() => applyRotate(90)} disabled={processing}>
-              <MaterialCommunityIcons name="rotate-right" size={20} color={colors.foreground} />
-              <Text style={[styles.actionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>+90°</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]} onPress={() => applyRotate(180)} disabled={processing}>
-              <MaterialCommunityIcons name="rotate-360" size={20} color={colors.foreground} />
-              <Text style={[styles.actionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>180°</Text>
-            </TouchableOpacity>
+          {/* Live preview */}
+          <View style={[styles.preview, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
+            <Image source={{ uri: current?.uri ?? image.uri }} style={[styles.previewImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
+            {(current?.width ?? image.width) > 0 && (
+              <Text style={[styles.dim, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                {current?.width ?? image.width}×{current?.height ?? image.height}px
+              </Text>
+            )}
           </View>
-          <View style={styles.row}>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]} onPress={() => applyFlip(FlipType.Horizontal)} disabled={processing}>
-              <MaterialCommunityIcons name="flip-horizontal" size={20} color={colors.foreground} />
-              <Text style={[styles.actionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>Flip H</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius - 4 }]} onPress={() => applyFlip(FlipType.Vertical)} disabled={processing}>
-              <MaterialCommunityIcons name="flip-vertical" size={20} color={colors.foreground} />
-              <Text style={[styles.actionText, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>Flip V</Text>
-            </TouchableOpacity>
+
+          {/* Rotate controls */}
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Rotate</Text>
+            <View style={styles.btnRow}>
+              {[{deg: -90, icon: 'rotate-left', label: '−90°'}, {deg: 90, icon: 'rotate-right', label: '+90°'}, {deg: 180, icon: 'rotate-360', label: '180°'}].map((op) => (
+                <TouchableOpacity key={op.deg} style={[styles.opBtn, { backgroundColor: COLOR + '14', borderColor: COLOR + '40', borderRadius: colors.radius - 6 }]}
+                  onPress={() => applyRotate(op.deg)} disabled={processing} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name={op.icon as any} size={22} color={COLOR} />
+                  <Text style={[styles.opLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>{op.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-          {processing && <ActivityIndicator color={COLOR} />}
+
+          {/* Flip controls */}
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Flip</Text>
+            <View style={styles.btnRow}>
+              {[{dir: FlipType.Horizontal, icon: 'flip-horizontal', label: 'Horizontal'}, {dir: FlipType.Vertical, icon: 'flip-vertical', label: 'Vertical'}].map((op) => (
+                <TouchableOpacity key={op.dir} style={[styles.opBtn, { backgroundColor: COLOR + '14', borderColor: COLOR + '40', borderRadius: colors.radius - 6 }]}
+                  onPress={() => applyFlip(op.dir)} disabled={processing} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name={op.icon as any} size={22} color={COLOR} />
+                  <Text style={[styles.opLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>{op.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {processing && <ActivityIndicator color={COLOR} style={{ alignSelf: 'center' }} />}
         </>
       )}
 
-      {current && (
+      {current && image && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: current.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{current.width}×{current.height}</Text>
-          </View>
+          {originalUri && <BeforeAfterToggle beforeUri={originalUri} afterUri={current.uri} color={COLOR} />}
           <ResultActions uri={current.uri} fileName={guessFileName('rotated', 'jpg')} color={COLOR} onReset={reset} />
         </>
       )}
@@ -111,10 +103,12 @@ export default function RotateFlipScreen() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 10 },
-  actionBtn: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 12, borderWidth: 1 },
-  actionText: { fontSize: 12 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  preview: { borderWidth: 1, padding: 8, gap: 6 },
+  previewImg: { width: '100%', height: 220, backgroundColor: '#00000006' },
+  dim: { fontSize: 11, textAlign: 'center' },
+  section: { borderWidth: 1, padding: 12, gap: 10 },
+  sectionTitle: { fontSize: 13 },
+  btnRow: { flexDirection: 'row', gap: 10 },
+  opBtn: { flex: 1, borderWidth: 1, alignItems: 'center', paddingVertical: 12, gap: 5 },
+  opLabel: { fontSize: 12 },
 });

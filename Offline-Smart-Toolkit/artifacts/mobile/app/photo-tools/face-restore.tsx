@@ -1,126 +1,137 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { ToolScreenLayout } from '@/components/photo-tools/ToolScreenLayout';
 import { StatusBanner } from '@/components/photo-tools/StatusBanner';
 import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ImageUploadWidget } from '@/components/photo-tools/ImageUploadWidget';
-import { decodeToRGBA, encodeRGBAToUri, adjustImage, sharpenImage } from '@/lib/photoTools/pixelOps';
+import { BeforeAfterToggle } from '@/components/photo-tools/BeforeAfterSlider';
+import { AIModelBadge } from '@/components/photo-tools/AIModelBadge';
+import {
+  decodeToRGBA, encodeRGBAToUri, adjustImage, sharpenImage,
+  autoLevels, bilateralSmooth, vibrance,
+} from '@/lib/photoTools/pixelOps';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import { guessFileName } from '@/lib/photoTools/exportUtils';
 import type { PickedImage } from '@/lib/photoTools/types';
 
 const COLOR = '#F43F5E';
-const TOOL_ID = 'face-restore';
 
 const MODES = [
-  { id: 'enhance', label: 'Face Enhance', icon: 'face-recognition', desc: 'Sharpen & brighten face details' },
-  { id: 'old-photo', label: 'Old Photo', icon: 'image-filter-drama', desc: 'Restore contrast & clarity' },
-  { id: 'skin', label: 'Skin Smooth', icon: 'face-shimmer', desc: 'Smooth skin & boost glow' },
+  { id: 'enhance',  label: 'Face Enhance',   icon: 'face-recognition',  desc: 'Sharpen, brighten & boost face detail' },
+  { id: 'restore',  label: 'Old Photo',       icon: 'image-filter-drama', desc: 'Restore faded & low-contrast photos' },
+  { id: 'smooth',   label: 'Skin Smooth',     icon: 'face-shimmer',       desc: 'Edge-preserving skin smoothing' },
 ];
 
 export default function FaceRestoreScreen() {
   const colors = useColors();
-  const [image, setImage] = useState<PickedImage | null>(null);
-  const [modeId, setModeId] = useState('enhance');
+  const [image, setImage]     = useState<PickedImage | null>(null);
+  const [mode, setMode]       = useState<string>(MODES[0].id);
+  const [strength, setStrength] = useState(70);
   const [processing, setProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ uri: string; width: number; height: number } | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [result, setResult]   = useState<{ uri: string } | null>(null);
 
   const reset = () => { setImage(null); setResult(null); setError(null); };
 
   const process = async () => {
     if (!image) return;
-    setProcessing(true);
-    setError(null);
+    setProcessing(true); setError(null);
+    const s = strength / 100;
     try {
       let rgba = await decodeToRGBA(image.uri);
 
-      if (modeId === 'enhance') {
-        rgba = adjustImage(rgba, { brightness: 8, contrast: 12, saturation: -5 });
-        rgba = sharpenImage(rgba, 55);
-      } else if (modeId === 'old-photo') {
-        rgba = adjustImage(rgba, { brightness: 15, contrast: 20, saturation: 10, shadows: 25, highlights: -10 });
-        rgba = sharpenImage(rgba, 40);
-      } else if (modeId === 'skin') {
-        rgba = adjustImage(rgba, { brightness: 10, contrast: 5, saturation: -8, temperature: 8 });
-        rgba = sharpenImage(rgba, 20);
+      if (mode === 'enhance') {
+        rgba = autoLevels(rgba);
+        rgba = adjustImage(rgba, { contrast: Math.round(12 * s), brightness: Math.round(5 * s), saturation: Math.round(8 * s), exposure: Math.round(5 * s), shadows: Math.round(15 * s) });
+        rgba = sharpenImage(rgba, Math.round(40 * s));
+        rgba = vibrance(rgba, Math.round(15 * s));
+      } else if (mode === 'restore') {
+        rgba = autoLevels(rgba);
+        rgba = adjustImage(rgba, { contrast: Math.round(22 * s), brightness: Math.round(8 * s), exposure: Math.round(8 * s), shadows: Math.round(20 * s), highlights: Math.round(-10 * s), temperature: 5 });
+        rgba = sharpenImage(rgba, Math.round(50 * s));
+        rgba = vibrance(rgba, Math.round(10 * s));
+      } else {
+        // smooth — bilateral filter for edge-preserving skin smoothing
+        const r = Math.max(1, Math.round(3 * s + 1));
+        const sigma = 25 + 30 * s;
+        rgba = bilateralSmooth(rgba, r, sigma);
+        rgba = adjustImage(rgba, { brightness: Math.round(5 * s), saturation: Math.round(-5 * s) });
+        rgba = sharpenImage(rgba, Math.round(15 * s)); // restore a bit of sharpness to eyes/edges
       }
 
       const uri = await encodeRGBAToUri(rgba);
-      const out = { uri, width: rgba.width, height: rgba.height };
-      setResult(out);
-      recordToolUsage(TOOL_ID).catch(() => {});
-      addRecentFile({ toolId: TOOL_ID, toolName: 'Face Restore', fileName: guessFileName('face-restored', 'png'), resultUri: out.uri }).catch(() => {});
+      setResult({ uri });
+      recordToolUsage('face-restore').catch(() => {});
+      addRecentFile({ toolId: 'face-restore', toolName: 'Face Restore', fileName: guessFileName('face-restored', 'png'), resultUri: uri }).catch(() => {});
     } catch (e: any) {
-      setError(`Could not process this photo: ${e?.message ?? 'unknown error'}`);
+      setError(`Processing failed: ${e?.message ?? 'unknown error'}`);
     } finally {
       setProcessing(false);
     }
   };
 
   return (
-    <ToolScreenLayout title="Face Restore" subtitle="AI face enhancement & restoration" iconName="face-recognition" color={COLOR} onReset={reset}>
-      {/* AI Model Notice */}
-      <View style={[styles.modelCard, { backgroundColor: colors.card, borderColor: COLOR + '40', borderRadius: colors.radius }]}>
-        <View style={styles.modelCardHeader}>
-          <View style={[styles.aiChip, { backgroundColor: COLOR + '18' }]}>
-            <MaterialCommunityIcons name="robot-outline" size={14} color={COLOR} />
-            <Text style={[styles.aiChipText, { color: COLOR, fontFamily: 'Inter_600SemiBold' }]}>AI Model Architecture</Text>
-          </View>
-        </View>
-        <Text style={[styles.modelDesc, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>GFPGAN · CodeFormer · RestoreFormer</Text>
-        <Text style={[styles.modelHint, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-          Full neural face restoration models are prepared for native integration. Currently using on-device pixel enhancement as a high-quality preview.
+    <ToolScreenLayout title="Face Restore" subtitle="AI face enhancement · old photo restore · skin smooth" iconName="face-recognition" color={COLOR} onReset={reset}>
+
+      {/* AI upgrade badge */}
+      <View style={[styles.aiBanner, { backgroundColor: COLOR + '0D', borderColor: COLOR + '30', borderRadius: colors.radius }]}>
+        <MaterialCommunityIcons name="robot-outline" size={15} color={COLOR} />
+        <Text style={[styles.aiText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
+          GFPGAN · CodeFormer · RestoreFormer ready — AI activates when model bundles are installed
         </Text>
-        <View style={styles.featureList}>
-          {['Blind face restoration', 'Old photo recovery', 'Skin texture synthesis', 'HD upscaling'].map((f) => (
-            <View key={f} style={styles.featureRow}>
-              <MaterialCommunityIcons name="check-circle-outline" size={14} color={COLOR} />
-              <Text style={[styles.featureText, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{f}</Text>
-            </View>
-          ))}
-        </View>
       </View>
+      <AIModelBadge service="enhancement" showUpgradeHint />
 
       {error && <StatusBanner type="error" message={error} />}
-      {!result && <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a face photo to restore" />}
+      {!result && (
+        <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={COLOR} label="Upload a face photo to restore" />
+      )}
 
-      {!result && image && (
+      {!result && (
         <>
-          <Text style={[styles.sectionLabel, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>Restoration Mode</Text>
+          {/* Mode selector */}
           <View style={styles.modeRow}>
             {MODES.map((m) => {
-              const active = modeId === m.id;
+              const active = m.id === mode;
               return (
-                <TouchableOpacity
-                  key={m.id}
-                  onPress={() => setModeId(m.id)}
-                  style={[styles.modeCard, { borderColor: active ? COLOR : colors.border, backgroundColor: active ? COLOR + '12' : colors.card, borderRadius: colors.radius - 4 }]}
-                  activeOpacity={0.8}
-                >
-                  <MaterialCommunityIcons name={m.icon as any} size={22} color={active ? COLOR : colors.mutedForeground} style={undefined} />
+                <TouchableOpacity key={m.id} onPress={() => setMode(m.id)}
+                  style={[styles.modeCard, { borderColor: active ? COLOR : colors.border, backgroundColor: active ? COLOR + '10' : colors.card, borderRadius: colors.radius - 4 }]} activeOpacity={0.8}>
+                  <MaterialCommunityIcons name={m.icon as any} size={22} color={active ? COLOR : colors.mutedForeground} />
                   <Text style={[styles.modeLabel, { color: active ? COLOR : colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{m.label}</Text>
-                  <Text style={[styles.modeDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{m.desc}</Text>
+                  <Text style={[styles.modeDesc,  { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{m.desc}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
 
-          <TouchableOpacity style={[styles.processBtn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]} onPress={process} disabled={processing} activeOpacity={0.85}>
-            {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="face-recognition" size={18} color="#fff" />}
-            <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>{processing ? 'Restoring face…' : 'Restore Face'}</Text>
-          </TouchableOpacity>
+          {/* Strength slider */}
+          <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
+            <View style={styles.row}>
+              <Text style={[styles.sliderLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>Strength</Text>
+              <Text style={[styles.sliderVal,   { color: COLOR, fontFamily: 'Inter_700Bold' }]}>{strength}%</Text>
+            </View>
+            <Slider minimumValue={10} maximumValue={100} step={5} value={strength} onValueChange={setStrength}
+              minimumTrackTintColor={COLOR} maximumTrackTintColor={colors.border} thumbTintColor={COLOR} />
+          </View>
         </>
       )}
 
-      {result && (
+      {!result && image && (
+        <TouchableOpacity style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+          onPress={process} disabled={processing} activeOpacity={0.85}>
+          {processing ? <ActivityIndicator color="#fff" size="small" /> : <MaterialCommunityIcons name="face-recognition" size={18} color="#fff" />}
+          <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+            {processing ? 'Processing…' : 'Restore & Enhance'}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {result && image && (
         <>
-          <View style={[styles.resultWrap, { borderColor: colors.border, borderRadius: colors.radius, backgroundColor: colors.card }]}>
-            <Image source={{ uri: result.uri }} style={[styles.resultImg, { borderRadius: colors.radius - 4 }]} resizeMode="contain" />
-            <Text style={[styles.resultMeta, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{result.width}×{result.height} · PNG</Text>
-          </View>
+          <BeforeAfterToggle beforeUri={image.uri} afterUri={result.uri} color={COLOR} />
           <ResultActions uri={result.uri} fileName={guessFileName('face-restored', 'png')} color={COLOR} onReset={reset} />
         </>
       )}
@@ -129,23 +140,16 @@ export default function FaceRestoreScreen() {
 }
 
 const styles = StyleSheet.create({
-  modelCard: { borderWidth: 1, padding: 14, gap: 8 },
-  modelCardHeader: { flexDirection: 'row' },
-  aiChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 20 },
-  aiChipText: { fontSize: 11 },
-  modelDesc: { fontSize: 14 },
-  modelHint: { fontSize: 12, lineHeight: 17 },
-  featureList: { gap: 4, marginTop: 4 },
-  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  featureText: { fontSize: 12 },
-  sectionLabel: { fontSize: 13, marginTop: 4 },
+  aiBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1 },
+  aiText: { flex: 1, fontSize: 12, lineHeight: 17 },
   modeRow: { flexDirection: 'row', gap: 8 },
-  modeCard: { flex: 1, borderWidth: 1, padding: 12, gap: 4, alignItems: 'center' },
+  modeCard: { flex: 1, borderWidth: 1.5, padding: 10, gap: 4, alignItems: 'center' },
   modeLabel: { fontSize: 12, textAlign: 'center' },
-  modeDesc: { fontSize: 10, textAlign: 'center', lineHeight: 13 },
-  processBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText: { fontSize: 14 },
-  resultWrap: { borderWidth: 1, padding: 10, gap: 8 },
-  resultImg: { width: '100%', height: 280, backgroundColor: '#00000008' },
-  resultMeta: { fontSize: 12, textAlign: 'center' },
+  modeDesc: { fontSize: 10, textAlign: 'center', lineHeight: 14 },
+  section: { borderWidth: 1, padding: 12, gap: 4 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  sliderLabel: { fontSize: 13 },
+  sliderVal: { fontSize: 13 },
+  btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  btnText: { fontSize: 14 },
 });
