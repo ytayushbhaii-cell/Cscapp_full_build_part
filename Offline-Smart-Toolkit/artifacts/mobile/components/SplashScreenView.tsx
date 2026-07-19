@@ -1,79 +1,98 @@
 /**
- * Custom Splash / Loading screen:
- *  - Off-white background (#F7F7FC)
- *  - Blue organic blob (top-left) + pink/lavender blob (bottom-right)
- *  - Dot-grid decorations (top-right, bottom-left)
- *  - Three concentric light rings centred on the icon
- *  - Rounded-square icon with blue→purple gradient border + SVG illustration
- *  - Animated blue→purple gradient progress bar + "Loading…" text
+ * SplashScreenView — matches the attached design reference exactly.
  *
- * Dimensions computed inside the component via useWindowDimensions()
- * to avoid the module-scope Dimensions-zero problem on web.
+ * Animations:
+ *   • Logo scales 0.6 → 1.0 over 1 500 ms (ease-out spring feel)
+ *   • Soft glow around logo fades in during scale, fades out near end
+ *   • Progress bar is driven by the real `progress` prop (0 → 1)
+ *
+ * Parent responsibility:
+ *   • Pass `progress` (0–1) tied to real loading events.
+ *   • When progress reaches 1 the parent unmounts this component and the
+ *     router renders the home screen automatically.
  */
 
 import React, { useEffect, useRef } from 'react';
 import {
-  View,
-  Text,
   Animated,
+  Platform,
   StyleSheet,
+  Text,
   useWindowDimensions,
+  View,
 } from 'react-native';
 import Svg, {
+  Circle,
+  ClipPath,
+  Defs,
+  G,
+  LinearGradient as SvgGradient,
   Path,
   Rect,
-  Circle,
-  Defs,
-  LinearGradient as SvgGradient,
   Stop,
-  G,
-  ClipPath,
 } from 'react-native-svg';
 
 interface Props {
-  /** Optional controlled progress 0–1. When omitted, auto-animates. */
-  progress?: number;
+  /** Real loading progress 0–1 supplied by the parent. */
+  progress: number;
 }
 
-const BAR_H = 4;
 const BORDER_W = 3;
+const BAR_H    = 5;
+const SPLASH_DURATION = 2000; // ms — kept in sync with parent
 
-export default function SplashScreenView({ progress: externalProgress }: Props) {
+export default function SplashScreenView({ progress }: Props) {
   const { width: W, height: H } = useWindowDimensions();
 
-  const ICON_SIZE   = Math.max(80, Math.round(Math.min(W, H) * 0.38));
-  const ICON_RADIUS = Math.max(12, Math.round(ICON_SIZE * 0.22));
+  const ICON_SIZE   = Math.max(80,  Math.round(Math.min(W, H) * 0.38));
+  const ICON_RADIUS = Math.max(12,  Math.round(ICON_SIZE * 0.22));
   const BAR_W       = Math.max(120, Math.round(W * 0.52));
-  const cx          = W / 2;
-  const cy          = H * 0.44;
+  const cx = W / 2;
+  const cy = H * 0.44;
 
-  const anim = useRef(new Animated.Value(0)).current;
+  // ── Scale animation 0.6 → 1.0 over 1 500 ms ──────────────────────────
+  const scaleAnim = useRef(new Animated.Value(0.6)).current;
+  const glowAnim  = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (externalProgress !== undefined) {
-      Animated.timing(anim, {
-        toValue: externalProgress,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    } else {
-      Animated.timing(anim, {
-        toValue: 0.85,
-        duration: 2400,
-        useNativeDriver: false,
-      }).start();
-    }
-  }, [externalProgress]);
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 1500,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 750,
+          useNativeDriver: false, // boxShadow is not supported by native driver
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0.4,
+          duration: 750,
+          useNativeDriver: false,
+        }),
+      ]),
+    ]).start();
+  }, []);
 
-  const fillW = anim.interpolate({
+  // Glow: animated shadow/spread around the icon wrapper
+  const glowOpacity = glowAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, BAR_W],
+    outputRange: [0, 0.55],
   });
+  const glowRadius = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 40],
+  });
+
+  // Progress bar fill width (driven by real prop, no fake animation)
+  const barFill = Math.min(1, Math.max(0, progress)) * BAR_W;
 
   return (
     <View style={styles.root}>
 
-      {/* ── Background decorations ─────────────────────────────────────── */}
+      {/* ── Full-screen background decorations (SVG) ───────────────────── */}
       <Svg
         style={StyleSheet.absoluteFill}
         viewBox={`0 0 ${W} ${H}`}
@@ -82,67 +101,102 @@ export default function SplashScreenView({ progress: externalProgress }: Props) 
         height={H}
       >
         <Defs>
+          {/* Top-left blue blob gradient */}
           <SvgGradient id="blobBlue" x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0"   stopColor="#B8D0FF" stopOpacity="0.90" />
-            <Stop offset="0.6" stopColor="#C8DCFF" stopOpacity="0.55" />
-            <Stop offset="1"   stopColor="#DCE9FF" stopOpacity="0.20" />
+            <Stop offset="0"   stopColor="#C0D8FF" stopOpacity="0.95" />
+            <Stop offset="0.6" stopColor="#CCDEFF" stopOpacity="0.60" />
+            <Stop offset="1"   stopColor="#E0EEFF" stopOpacity="0.15" />
           </SvgGradient>
+          {/* Bottom-right pink/lavender blob gradient */}
           <SvgGradient id="blobPink" x1="1" y1="1" x2="0" y2="0">
-            <Stop offset="0"   stopColor="#E8C8FF" stopOpacity="0.85" />
-            <Stop offset="0.5" stopColor="#F0D8FF" stopOpacity="0.55" />
-            <Stop offset="1"   stopColor="#F8EEFF" stopOpacity="0.20" />
+            <Stop offset="0"   stopColor="#DFC8FF" stopOpacity="0.90" />
+            <Stop offset="0.5" stopColor="#EAD8FF" stopOpacity="0.60" />
+            <Stop offset="1"   stopColor="#F5EEFF" stopOpacity="0.15" />
           </SvgGradient>
         </Defs>
 
-        {/* Top-left blue blob */}
+        {/* Top-left blob */}
         <Path
-          d={`M 0,0 C ${W*0.08},0 ${W*0.30},${H*0.01} ${W*0.32},${H*0.08} C ${W*0.35},${H*0.14} ${W*0.20},${H*0.20} ${W*0.10},${H*0.19} C ${W*0.03},${H*0.18} 0,${H*0.14} 0,${H*0.10} Z`}
+          d={`M 0,0 C ${W*0.09},0 ${W*0.32},${H*0.01} ${W*0.34},${H*0.09}
+              C ${W*0.37},${H*0.16} ${W*0.22},${H*0.22} ${W*0.11},${H*0.21}
+              C ${W*0.03},${H*0.20} 0,${H*0.15} 0,${H*0.11} Z`}
           fill="url(#blobBlue)"
         />
 
-        {/* Bottom-right pink blob */}
+        {/* Bottom-right blob */}
         <Path
-          d={`M ${W},${H} C ${W*0.90},${H} ${W*0.70},${H*0.97} ${W*0.68},${H*0.90} C ${W*0.65},${H*0.82} ${W*0.80},${H*0.76} ${W*0.92},${H*0.77} C ${W*1.02},${H*0.78} ${W},${H*0.84} ${W},${H*0.90} Z`}
+          d={`M ${W},${H} C ${W*0.88},${H} ${W*0.68},${H*0.96} ${W*0.66},${H*0.88}
+              C ${W*0.63},${H*0.80} ${W*0.78},${H*0.74} ${W*0.91},${H*0.75}
+              C ${W*1.03},${H*0.76} ${W},${H*0.83} ${W},${H*0.90} Z`}
           fill="url(#blobPink)"
         />
 
         {/* Dot grid — top-right */}
-        {Array.from({ length: 6 }, (_, row) =>
+        {Array.from({ length: 5 }, (_, row) =>
           Array.from({ length: 5 }, (_, col) => (
             <Circle key={`tr-${row}-${col}`}
-              cx={W * 0.72 + col * 14} cy={H * 0.07 + row * 14}
-              r={1.8} fill="#C8C8DC" opacity={0.6}
+              cx={W * 0.74 + col * 13} cy={H * 0.06 + row * 13}
+              r={1.6} fill="#BEBEDD" opacity={0.55}
             />
           ))
         )}
 
         {/* Dot grid — bottom-left */}
-        {Array.from({ length: 6 }, (_, row) =>
+        {Array.from({ length: 5 }, (_, row) =>
           Array.from({ length: 5 }, (_, col) => (
             <Circle key={`bl-${row}-${col}`}
-              cx={W * 0.06 + col * 14} cy={H * 0.78 + row * 14}
-              r={1.8} fill="#C8C8DC" opacity={0.6}
+              cx={W * 0.05 + col * 13} cy={H * 0.79 + row * 13}
+              r={1.6} fill="#BEBEDD" opacity={0.55}
             />
           ))
         )}
 
-        {/* Concentric rings */}
-        {[W * 0.42, W * 0.30, W * 0.20].map((r, i) => (
+        {/* Concentric halo rings */}
+        {[W * 0.44, W * 0.32, W * 0.21].map((r, i) => (
           <Circle key={`ring-${i}`}
             cx={cx} cy={cy} r={r}
-            stroke="#DDDDE8" strokeWidth={i === 0 ? 0.8 : 1} fill="none"
+            stroke="#DCDCEC"
+            strokeWidth={i === 0 ? 0.7 : 0.9}
+            fill="none"
           />
         ))}
       </Svg>
 
-      {/* ── App icon ────────────────────────────────────────────────────── */}
-      <View style={{
-        position: 'absolute',
-        width: ICON_SIZE,
-        height: ICON_SIZE,
-        top: cy - ICON_SIZE / 2,
-        left: W / 2 - ICON_SIZE / 2,
-      }}>
+      {/* ── Animated icon (scale + glow) ────────────────────────────────── */}
+      {/* Glow layer (non-native animated, behind the icon) */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          width:  ICON_SIZE + 80,
+          height: ICON_SIZE + 80,
+          top:  cy - (ICON_SIZE + 80) / 2,
+          left: W / 2 - (ICON_SIZE + 80) / 2,
+          borderRadius: (ICON_SIZE + 80) / 2,
+          opacity: glowOpacity,
+          ...(Platform.OS === 'web'
+            ? ({
+                boxShadow: '0 0 60px 20px rgba(96,80,240,0.35)',
+              } as any)
+            : {
+                shadowColor: '#7060F0',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.45,
+                shadowRadius: 40,
+              }),
+        }}
+      />
+
+      {/* Icon wrapper — scale transform applied here */}
+      <Animated.View
+        style={{
+          position: 'absolute',
+          width:  ICON_SIZE,
+          height: ICON_SIZE,
+          top:  cy - ICON_SIZE / 2,
+          left: W / 2 - ICON_SIZE / 2,
+          transform: [{ scale: scaleAnim }],
+        }}
+      >
         <Svg width={ICON_SIZE} height={ICON_SIZE} style={StyleSheet.absoluteFill}>
           <Defs>
             <SvgGradient id="iconBorder" x1="0" y1="0" x2="1" y2="1">
@@ -158,7 +212,7 @@ export default function SplashScreenView({ progress: externalProgress }: Props) 
             </ClipPath>
           </Defs>
 
-          {/* Gradient border */}
+          {/* Gradient border (outer rect) */}
           <Rect x={0} y={0}
             width={Math.max(0, ICON_SIZE)} height={Math.max(0, ICON_SIZE)}
             rx={Math.max(0, ICON_RADIUS)} ry={Math.max(0, ICON_RADIUS)}
@@ -174,26 +228,20 @@ export default function SplashScreenView({ progress: externalProgress }: Props) 
             fill="white"
           />
 
-          {/* Illustration clipped to rounded square */}
+          {/* Illustration */}
           <G clipPath="url(#iconClip)">
             <IconIllustration size={ICON_SIZE} border={BORDER_W} />
           </G>
         </Svg>
-      </View>
+      </Animated.View>
 
-      {/* ── Progress bar + label ─────────────────────────────────────────── */}
+      {/* ── Progress bar + label ──────────────────────────────────────────── */}
       <View style={[styles.loadingArea, { top: H * 0.87 }]}>
-        <View style={{
-          width: BAR_W, height: BAR_H,
-          backgroundColor: '#E4E4EE',
-          borderRadius: BAR_H / 2,
-          overflow: 'hidden',
-        }}>
-          <Animated.View style={{
-            width: fillW, height: BAR_H,
-            overflow: 'hidden',
-            borderRadius: BAR_H / 2,
-          }}>
+        {/* Track */}
+        <View style={[styles.track, { width: BAR_W }]}>
+          {/* Gradient fill — width set directly (no Animated.Value needed; */}
+          {/* parent drives re-renders via `progress` prop changes).         */}
+          <View style={{ width: barFill, height: BAR_H, borderRadius: BAR_H / 2, overflow: 'hidden' }}>
             <Svg width={BAR_W} height={BAR_H}>
               <Defs>
                 <SvgGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
@@ -203,10 +251,9 @@ export default function SplashScreenView({ progress: externalProgress }: Props) 
                 </SvgGradient>
               </Defs>
               <Rect x={0} y={0} width={BAR_W} height={BAR_H}
-                rx={BAR_H / 2} fill="url(#barGrad)"
-              />
+                rx={BAR_H / 2} fill="url(#barGrad)" />
             </Svg>
-          </Animated.View>
+          </View>
         </View>
 
         <Text style={styles.loadingText}>Loading...</Text>
@@ -215,74 +262,78 @@ export default function SplashScreenView({ progress: externalProgress }: Props) 
   );
 }
 
-// ─── Icon inner illustration ──────────────────────────────────────────────────
+// ─── Icon illustration ────────────────────────────────────────────────────────
 
 function IconIllustration({ size, border }: { size: number; border: number }) {
   const pad = border + size * 0.08;
   const iW  = Math.max(1, size - pad * 2);
   const iH  = Math.max(1, size - pad * 2);
+  const px  = (u: number) => pad + u * iW;
+  const py  = (u: number) => pad + u * iH;
 
-  const px = (u: number) => pad + u * iW;
-  const py = (u: number) => pad + u * iH;
+  // ── Blue 3-D folded document ──────────────────────────────────────────
+  const docX  = px(0.06);
+  const docY  = py(0.10);
+  const docW  = Math.max(0, iW * 0.54);
+  const docH  = Math.max(0, iH * 0.68);
+  const fold  = Math.max(0, iW * 0.12);
 
-  // Blue document
-  const docFx = px(0.10);
-  const docFy = py(0.12);
-  const docFW = Math.max(0, iW * 0.50);
-  const docFH = Math.max(0, iH * 0.65);
-  const fold  = Math.max(0, iW * 0.10);
+  // Back-page (lighter, offset down-right)
+  const bkX = docX + iW * 0.05;
+  const bkY = docY + iH * 0.06;
 
-  const docBx = px(0.05);
-  const docBy = py(0.18);
-  const docBW = Math.max(0, iW * 0.52);
-  const docBH = Math.max(0, iH * 0.62);
+  const frontPath = `
+    M ${docX},${docY + fold}
+    L ${docX},${docY + docH}
+    L ${docX + docW},${docY + docH}
+    L ${docX + docW},${docY}
+    L ${docX + fold},${docY} Z`;
+  const foldFlap = `
+    M ${docX + fold},${docY}
+    L ${docX + fold},${docY + fold}
+    L ${docX},${docY + fold} Z`;
 
-  const foldPath   = `M ${docFx},${docFy + fold} L ${docFx},${docFy + docFH} L ${docFx + docFW},${docFy + docFH} L ${docFx + docFW},${docFy} L ${docFx + fold},${docFy} Z`;
-  const foldCorner = `M ${docFx + fold},${docFy} L ${docFx + fold},${docFy + fold} L ${docFx},${docFy + fold} Z`;
+  // ── Rocket ────────────────────────────────────────────────────────────
+  const rCx  = px(0.75);
+  const rCy  = py(0.20);
+  const rLen = Math.max(1, iW * 0.28);
+  const rWH  = Math.max(0.5, iW * 0.052);
+  const hL   = rLen / 2;
+  const ang  = -Math.PI / 4;
+  const cos  = Math.cos(ang);
+  const sin  = Math.sin(ang);
+  const rp   = (lx: number, ly: number) => ({
+    x: rCx + lx * cos - ly * sin,
+    y: rCy + lx * sin + ly * cos,
+  });
+  const rp0 = rp(-hL, -rWH);
+  const rp1 = rp( hL, -rWH);
+  const rp2 = rp( hL,  rWH);
+  const rp3 = rp(-hL,  rWH);
+  const tip = rp(-hL - rWH * 1.4, 0);
+  const nib = rp( hL - rWH * 0.5, 0);
 
-  // Pen / rocket
-  const penCx  = px(0.72);
-  const penCy  = py(0.22);
-  const penL   = Math.max(1, iW * 0.30);
-  const penW2  = Math.max(0.5, iW * 0.055);
-  const halfL  = penL / 2;
-  const angle  = -Math.PI / 4;
-  const cosA   = Math.cos(angle);
-  const sinA   = Math.sin(angle);
-
-  function rotPt(lx: number, ly: number) {
-    return { x: penCx + lx * cosA - ly * sinA, y: penCy + lx * sinA + ly * cosA };
-  }
-  const p0  = rotPt(-halfL, -penW2);
-  const p1  = rotPt( halfL, -penW2);
-  const p2  = rotPt( halfL,  penW2);
-  const p3  = rotPt(-halfL,  penW2);
-  const tip = rotPt(-halfL - penW2 * 1.2, 0);
-  const nib = rotPt( halfL - penW2, 0);
-
-  const penBody = `M ${p0.x},${p0.y} L ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${p3.x},${p3.y} Z`;
-  const penTip  = `M ${p3.x},${p3.y} L ${p0.x},${p0.y} L ${tip.x},${tip.y} Z`;
-  const penNib  = `M ${p1.x},${p1.y} L ${p2.x},${p2.y} L ${nib.x},${nib.y} Z`;
-
-  // Image frame
-  const imgX = px(0.28);
+  // ── Image frame ───────────────────────────────────────────────────────
+  const imgX = px(0.26);
   const imgY = py(0.60);
-  const imgW = Math.max(0, iW * 0.32);
-  const imgH = Math.max(0, iH * 0.28);
+  const imgW = Math.max(0, iW * 0.30);
+  const imgH = Math.max(0, iH * 0.26);
 
-  const mtnPath = `M ${imgX + imgW*0.05},${imgY + imgH*0.85} L ${imgX + imgW*0.30},${imgY + imgH*0.45} L ${imgX + imgW*0.55},${imgY + imgH*0.70} L ${imgX + imgW*0.70},${imgY + imgH*0.52} L ${imgX + imgW*0.95},${imgY + imgH*0.85} Z`;
-
-  // QR code
+  // ── QR code ───────────────────────────────────────────────────────────
   const qrX  = px(0.60);
   const qrY  = py(0.48);
   const qrSz = Math.max(0, iW * 0.32);
   const cell = Math.max(0, qrSz / 7);
-  const cw   = Math.max(0, cell * 0.78);
+  const cw   = Math.max(0, cell * 0.76);
 
-  const qrModules: [number, number][] = [
+  const qrBits: [number, number][] = [
+    // finder top-left
     [0,0],[1,0],[2,0],[0,1],[2,1],[0,2],[1,2],[2,2],
+    // finder top-right
     [4,0],[5,0],[6,0],[4,1],[6,1],[4,2],[5,2],[6,2],
+    // finder bottom-left
     [0,4],[1,4],[2,4],[0,5],[2,5],[0,6],[1,6],[2,6],
+    // data modules
     [4,4],[5,4],[6,4],[4,5],[5,5],[4,6],[6,6],
     [3,3],[6,3],[3,6],[3,4],[6,5],
   ];
@@ -290,59 +341,93 @@ function IconIllustration({ size, border }: { size: number; border: number }) {
   return (
     <G>
       <Defs>
-        <SvgGradient id="dBlueDk" x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor="#4FA3F7" /><Stop offset="1" stopColor="#1A6FE0" />
+        <SvgGradient id="docFrontG" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#5BAAFF" />
+          <Stop offset="1" stopColor="#1A6FE0" />
         </SvgGradient>
-        <SvgGradient id="dBlueLt" x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor="#7EC8FF" /><Stop offset="1" stopColor="#4FA3F7" />
+        <SvgGradient id="docBackG" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#90C8FF" />
+          <Stop offset="1" stopColor="#5B9BF0" />
         </SvgGradient>
-        <SvgGradient id="penGrd" x1="0" y1="0" x2="1" y2="1">
-          <Stop offset="0" stopColor="#A060F8" /><Stop offset="0.5" stopColor="#6050E8" /><Stop offset="1" stopColor="#4888F0" />
+        <SvgGradient id="rocketG" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#B060FF" />
+          <Stop offset="0.5" stopColor="#6050E8" />
+          <Stop offset="1" stopColor="#4080F0" />
         </SvgGradient>
-        <SvgGradient id="imgGrd" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#28B8A0" /><Stop offset="1" stopColor="#1A9880" />
+        <SvgGradient id="imgFrG" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#30C0A8" />
+          <Stop offset="1" stopColor="#18A080" />
         </SvgGradient>
-        <SvgGradient id="skyGrd" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#C0E8FF" /><Stop offset="1" stopColor="#DCF2FF" />
+        <SvgGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#C8E8FF" />
+          <Stop offset="1" stopColor="#DCF0FF" />
         </SvgGradient>
       </Defs>
 
       {/* Back document */}
-      <Rect x={docBx} y={docBy} width={docBW} height={docBH} rx={3} ry={3} fill="url(#dBlueLt)" opacity={0.65} />
+      <Rect x={bkX} y={bkY}
+        width={Math.max(0, docW)} height={Math.max(0, docH)}
+        rx={3} ry={3} fill="url(#docBackG)" opacity={0.60}
+      />
 
       {/* Front document */}
-      <Path d={foldPath} fill="url(#dBlueDk)" />
-      <Path d={foldCorner} fill="#1A5FD0" opacity={0.85} />
+      <Path d={frontPath} fill="url(#docFrontG)" />
+      <Path d={foldFlap}  fill="#1455C0" opacity={0.80} />
 
-      {/* Document lines */}
-      {[0.35, 0.48, 0.61, 0.74].map((yF, i) => (
+      {/* Gloss highlight on front doc */}
+      <Path
+        d={`M ${docX + fold + 2},${docY} L ${docX + docW - 2},${docY} L ${docX + docW - 2},${docY + 6} L ${docX + fold + 2},${docY + 6} Z`}
+        fill="rgba(255,255,255,0.18)"
+      />
+
+      {/* Text lines on doc */}
+      {[0.36, 0.49, 0.62, 0.75].map((yF, i) => (
         <Rect key={i}
-          x={docFx + docFW * 0.15} y={docFy + docFH * yF}
-          width={Math.max(0, docFW * (i % 2 === 0 ? 0.65 : 0.50))} height={Math.max(0.5, size * 0.009)}
-          rx={1} fill="rgba(255,255,255,0.55)"
+          x={docX + docW * 0.15}
+          y={docY + docH * yF}
+          width={Math.max(0, docW * (i % 2 === 0 ? 0.62 : 0.46))}
+          height={Math.max(0.5, size * 0.008)}
+          rx={1} fill="rgba(255,255,255,0.50)"
         />
       ))}
 
-      {/* Pen */}
-      <Path d={penBody} fill="url(#penGrd)" />
-      <Path d={penTip}  fill="#8840F0" />
-      <Path d={penNib}  fill="rgba(255,255,255,0.28)" />
+      {/* Rocket body */}
+      <Path d={`M ${rp0.x},${rp0.y} L ${rp1.x},${rp1.y} L ${rp2.x},${rp2.y} L ${rp3.x},${rp3.y} Z`}
+        fill="url(#rocketG)" />
+      <Path d={`M ${rp3.x},${rp3.y} L ${rp0.x},${rp0.y} L ${tip.x},${tip.y} Z`}
+        fill="#8030D8" />
+      <Path d={`M ${rp1.x},${rp1.y} L ${rp2.x},${rp2.y} L ${nib.x},${nib.y} Z`}
+        fill="rgba(255,255,255,0.25)" />
 
       {/* Image frame */}
-      <Rect x={imgX} y={imgY} width={imgW} height={imgH} rx={4} ry={4} fill="url(#imgGrd)" />
-      <Rect x={imgX+2} y={imgY+2} width={Math.max(0,imgW-4)} height={Math.max(0,imgH*0.55)} rx={2} ry={2} fill="url(#skyGrd)" />
-      <Circle cx={imgX + imgW*0.80} cy={imgY + imgH*0.22} r={Math.max(0, imgW*0.10)} fill="#FFD84A" />
-      <Path d={mtnPath} fill="url(#imgGrd)" />
-      <Rect x={imgX} y={imgY} width={imgW} height={imgH} rx={4} ry={4} fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth={1.5} />
+      <Rect x={imgX} y={imgY} width={imgW} height={imgH} rx={4} ry={4} fill="url(#imgFrG)" />
+      <Rect x={imgX+2} y={imgY+2}
+        width={Math.max(0, imgW - 4)} height={Math.max(0, imgH * 0.52)}
+        rx={2} ry={2} fill="url(#skyG)" />
+      <Circle cx={imgX + imgW * 0.78} cy={imgY + imgH * 0.22}
+        r={Math.max(0, imgW * 0.09)} fill="#FFD040" />
+      {/* Mountain silhouette */}
+      <Path
+        d={`M ${imgX+imgW*0.05},${imgY+imgH*0.84}
+            L ${imgX+imgW*0.28},${imgY+imgH*0.44}
+            L ${imgX+imgW*0.52},${imgY+imgH*0.68}
+            L ${imgX+imgW*0.68},${imgY+imgH*0.50}
+            L ${imgX+imgW*0.95},${imgY+imgH*0.84} Z`}
+        fill="url(#imgFrG)"
+      />
+      <Rect x={imgX} y={imgY} width={imgW} height={imgH} rx={4} ry={4}
+        fill="none" stroke="rgba(255,255,255,0.40)" strokeWidth={1.2} />
 
-      {/* QR code */}
-      <Rect x={qrX} y={qrY} width={qrSz} height={qrSz} rx={3} ry={3} fill="white" stroke="#D0D0E0" strokeWidth={1} />
-      {qrModules.map(([col, row]) => (
+      {/* QR code background */}
+      <Rect x={qrX} y={qrY} width={qrSz} height={qrSz} rx={3} ry={3}
+        fill="white" stroke="#D0D0E0" strokeWidth={0.8} />
+      {/* QR modules */}
+      {qrBits.map(([col, row]) => (
         <Rect key={`q${col}-${row}`}
-          x={qrX + col * cell + cell * 0.11}
-          y={qrY + row * cell + cell * 0.11}
-          width={cw} height={cw}
-          rx={0.5} fill="#2040A0"
+          x={qrX + col * cell + cell * 0.12}
+          y={qrY + row * cell + cell * 0.12}
+          width={Math.max(0, cw)} height={Math.max(0, cw)}
+          rx={0.5} fill="#1C38A0"
         />
       ))}
     </G>
@@ -354,19 +439,25 @@ function IconIllustration({ size, border }: { size: number; border: number }) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F7F7FC',
+    backgroundColor: '#F8F8FC',
   },
   loadingArea: {
     position: 'absolute',
     left: 0,
     right: 0,
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+  },
+  track: {
+    height: BAR_H,
+    backgroundColor: '#E2E2EE',
+    borderRadius: BAR_H / 2,
+    overflow: 'hidden',
   },
   loadingText: {
     fontSize: 13,
-    color: '#9090B0',
+    color: '#9090B4',
     fontWeight: '400',
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
 });

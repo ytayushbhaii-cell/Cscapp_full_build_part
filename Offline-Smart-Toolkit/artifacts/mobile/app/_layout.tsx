@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
@@ -17,15 +17,16 @@ import { AppProvider } from '@/context/AppContext';
 import { SettingsProvider } from '@/context/SettingsContext';
 import SplashScreenView from '@/components/SplashScreenView';
 
-// Hide the native expo splash immediately — our custom React splash replaces it.
-SplashScreen.preventAutoHideAsync().then(() => SplashScreen.hideAsync()).catch(() => {});
+// Suppress the native Expo splash immediately — our React splash is the only one.
+SplashScreen.preventAutoHideAsync()
+  .then(() => SplashScreen.hideAsync())
+  .catch(() => {});
 
-// Minimum ms to keep custom splash visible (fonts often load instantly on web).
-const MIN_SPLASH_MS = 2600;
+/** Total splash duration in ms. */
+const SPLASH_MS = 2000;
 
 function RootLayoutInner() {
   const { isDark } = useTheme();
-
   return (
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -42,17 +43,45 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  const [minTimeDone, setMinTimeDone] = useState(false);
+  // Real progress: driven by elapsed time (0→1 over SPLASH_MS) gated on fonts.
+  const [progress, setProgress]   = useState(0);
+  const [splashDone, setSplashDone] = useState(false);
+
+  const startRef       = useRef<number>(Date.now());
+  const intervalRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fontsLoadedRef = useRef(false);
+
+  // Keep ref in sync so the interval closure sees the latest value.
+  useEffect(() => {
+    fontsLoadedRef.current = !!fontsLoaded;
+  }, [fontsLoaded]);
 
   useEffect(() => {
-    const t = setTimeout(() => setMinTimeDone(true), MIN_SPLASH_MS);
-    return () => clearTimeout(t);
+    const TICK_MS = 30; // ~33 fps update rate
+
+    intervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startRef.current;
+
+      // While fonts are still loading we allow progress up to 80%.
+      // Once fonts are ready we let it run all the way to 100%.
+      const cap = fontsLoadedRef.current ? 1.0 : 0.80;
+      const raw = Math.min(elapsed / SPLASH_MS, cap);
+
+      setProgress(raw);
+
+      if (raw >= 1.0) {
+        clearInterval(intervalRef.current!);
+        setSplashDone(true);
+      }
+    }, TICK_MS);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, []);
 
-  const ready = fontsLoaded && minTimeDone;
-
-  if (!ready) {
-    return <SplashScreenView />;
+  if (!splashDone) {
+    return <SplashScreenView progress={progress} />;
   }
 
   return (
