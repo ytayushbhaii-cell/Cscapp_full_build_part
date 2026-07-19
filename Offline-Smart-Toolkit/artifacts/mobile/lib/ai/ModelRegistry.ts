@@ -2,9 +2,8 @@
  * Central AI Model Registry — tracks which models are on-device, their load
  * status, and the currently active backend for each service.
  *
- * Architecture: BiRefNet ONNX is the primary (and only) segmentation model
- * on web. BodyPix MobileNetV1 remains the native-only fallback until
- * onnxruntime-react-native support is added.
+ * Segmentation priority (web):
+ *   BiRefNet → RMBG-2.0 → U2Net-Portrait → IS-Net → BodyPix (native only)
  */
 import type { ModelInfo, ModelStatus, SegmentationBackend, FaceBackend, EnhancementBackend } from './types';
 
@@ -17,21 +16,22 @@ class AIModelRegistry {
 
   private registerDefaults() {
     // ── Segmentation ──────────────────────────────────────────────────────────
-    // BiRefNet (bundled in public/models/birefnet-q.onnx) — web primary
-    this.register({ id: 'birefnet',   name: 'BiRefNet · ONNX',        backend: 'birefnet',  status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
-    // BodyPix — native fallback only (not shown on web)
-    this.register({ id: 'bodypix',   name: 'BodyPix MobileNetV1',    backend: 'bodypix',   status: 'offline-cpu',    maxRes: 0,   sizeMB: 4   });
+    this.register({ id: 'birefnet',  name: 'BiRefNet · ONNX',       backend: 'birefnet', status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
+    this.register({ id: 'rmbg2',     name: 'RMBG-2.0 · ONNX',       backend: 'rmbg2',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 80  });
+    this.register({ id: 'u2net',     name: 'U2Net-Portrait · ONNX',  backend: 'u2net',    status: 'ai-unavailable', maxRes: 320,  sizeMB: 4.4 });
+    this.register({ id: 'isnet',     name: 'IS-Net · ONNX',          backend: 'isnet',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 176 });
+    this.register({ id: 'bodypix',   name: 'BodyPix MobileNetV1',    backend: 'bodypix',  status: 'offline-cpu',    maxRes: 0,   sizeMB: 4   });
 
     // ── Face detection / alignment ────────────────────────────────────────────
-    this.register({ id: 'bodypix-face',  name: 'BodyPix Face Centroid', backend: 'bodypix-centroid', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
-    this.register({ id: 'mediapipe',     name: 'MediaPipe Face Mesh',   backend: 'mediapipe',        status: 'ai-unavailable', maxRes: 192, sizeMB: 2.8 });
-    this.register({ id: 'retinaface',    name: 'RetinaFace',            backend: 'retinaface',       status: 'ai-unavailable', maxRes: 640, sizeMB: 1.7 });
+    this.register({ id: 'bodypix-face', name: 'BodyPix Face Centroid', backend: 'bodypix-centroid', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
+    this.register({ id: 'mediapipe',    name: 'MediaPipe Face Mesh',   backend: 'mediapipe',        status: 'ai-unavailable', maxRes: 192, sizeMB: 2.8 });
+    this.register({ id: 'retinaface',   name: 'RetinaFace',            backend: 'retinaface',       status: 'ai-unavailable', maxRes: 640, sizeMB: 1.7 });
 
     // ── Enhancement / super-resolution ───────────────────────────────────────
-    this.register({ id: 'cpu-sharpen',  name: 'CPU Unsharp Mask',    backend: 'cpu-sharpen', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
-    this.register({ id: 'real-esrgan',  name: 'Real-ESRGAN x4+',     backend: 'real-esrgan', status: 'ai-unavailable', maxRes: 0,   sizeMB: 67  });
-    this.register({ id: 'gfpgan',       name: 'GFPGAN v1.4',          backend: 'gfpgan',      status: 'ai-unavailable', maxRes: 512, sizeMB: 332 });
-    this.register({ id: 'codeformer',   name: 'CodeFormer',           backend: 'codeformer',  status: 'ai-unavailable', maxRes: 512, sizeMB: 375 });
+    this.register({ id: 'cpu-sharpen', name: 'CPU Unsharp Mask',  backend: 'cpu-sharpen', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
+    this.register({ id: 'real-esrgan', name: 'Real-ESRGAN x4+',   backend: 'real-esrgan', status: 'ai-unavailable', maxRes: 0,   sizeMB: 67  });
+    this.register({ id: 'gfpgan',      name: 'GFPGAN v1.4',        backend: 'gfpgan',      status: 'ai-unavailable', maxRes: 512, sizeMB: 332 });
+    this.register({ id: 'codeformer',  name: 'CodeFormer',         backend: 'codeformer',  status: 'ai-unavailable', maxRes: 512, sizeMB: 375 });
   }
 
   register(info: ModelInfo) {
@@ -53,9 +53,11 @@ class AIModelRegistry {
 
   /** Best available segmentation backend */
   bestSegmentationBackend(): SegmentationBackend {
-    const birefnet = this.models.get('birefnet');
-    if (birefnet && birefnet.status === 'ai-cached') return 'birefnet';
-    return 'bodypix'; // native fallback
+    for (const id of ['birefnet', 'rmbg2', 'u2net', 'isnet']) {
+      const m = this.models.get(id);
+      if (m && m.status === 'ai-cached') return m.backend as SegmentationBackend;
+    }
+    return 'bodypix';
   }
 
   bestFaceBackend(): FaceBackend {
@@ -78,10 +80,10 @@ class AIModelRegistry {
     const backend = this.bestSegmentationBackend();
     const labels: Record<SegmentationBackend, string> = {
       'bodypix':  'BodyPix · CPU',
-      'u2net':    'U2Net',
+      'u2net':    'U2Net-Portrait · ONNX',
       'birefnet': 'BiRefNet · ONNX',
       'rmbg2':    'RMBG-2.0 · ONNX',
-      'isnet':    'IS-Net',
+      'isnet':    'IS-Net · ONNX',
     };
     return labels[backend] ?? backend;
   }

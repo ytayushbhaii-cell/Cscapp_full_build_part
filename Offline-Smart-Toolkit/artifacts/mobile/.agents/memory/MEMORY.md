@@ -1,0 +1,13 @@
+- [pdf-lib Metro web crash](pdf-lib-metro-web.md) — pdf-lib's ES build imports tslib@1.x ESM shim which lacks default export; fix via `.web.ts` platform-extension stub (don't import pdf-lib on web).
+- [Metro pdf-lib CJS resolver fix](metro-pdf-lib-cjs-fix.md) — `resolverMainFields` alone insufficient for Expo SDK 50+ web; use `resolveRequest` override in metro.config.js to force pdf-lib → CJS build.
+- [tfjs-react-native barrel imports](tfjs-barrel-imports.md) — barrel unconditionally pulls expo-camera/expo-gl/react-native-fs; deep-import `decodeJpeg` from `@tensorflow/tfjs-react-native/dist/decode_image` instead.
+- [Metro platform extension vs runtime guard](metro-platform-extension.md) — Metro statically analyzes require() regardless of runtime Platform.OS checks; use `.web.ts` / `.native.ts` extension files for libs with broken web builds.
+- [RN Slider removed from core](rn-community-slider.md) — React Native dropped bundled Slider; use `@react-native-community/slider` in this project.
+- [PNG encode in React Native](rn-png-encode.md) — No Canvas API in RN; use pure-JS `upng-js` + `base64-js` to encode raw RGBA buffers to PNG on both web and native.
+- [Segmentation resolution cap](segmentation-resolution-cap.md) — Must resize images to ≤1024px before guided-filter/SAM2 pipeline; full-res causes infinite loading on large photos.
+- [onnxruntime-web Metro CJS fix](onnxruntime-web-metro-cjs-fix.md) — Metro rejects ORT ESM bundle (webpack-ignore dynamic import); redirect onnxruntime-web → dist/ort.min.js via resolveRequest.
+- [ORT 1.27 JSEP crash fix](ort-jsep-crash-fix.md) — use ort.wasm.min.js not ort.min.js; full bundle always fetches .jsep.mjs at init, crashing when file is absent.
+- [Platform shadow cross-compat](platform-shadow.md) — shadow* props deprecated on web; wrap all shadow* in Platform.select({web:{boxShadow:...}as any, default:{shadowColor:...}}) inside StyleSheet.create.
+- [ortLoader platform extension TS stub](ortloader-ts-stub.md) — ortLoader.web.ts / .native.ts exist but tsc can't resolve platform extensions; create ortLoader.ts base stub with same signature.
+- [expo-file-system dynamic import typing](expo-fs-dynamic-import.md) — dynamic `await import('expo-file-system')` returns module namespace; cast as any to access cacheDirectory/writeAsStringAsync.
+- [BiRefNet multi-model fallback](birefnet-multi-model-fallback.md) — priority chain BiRefNet→RMBG2→U2Net→ISNet; each HEAD-checked, graceful skip if absent.

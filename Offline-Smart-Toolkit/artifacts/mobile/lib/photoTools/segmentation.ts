@@ -1,20 +1,22 @@
 /**
  * Segmentation — backward-compatible thin wrapper over lib/ai/services/SegmentationService.
  *
- * ALL existing tool screens import from here (unchanged) and automatically get:
- *  • 0.75× multiplier BodyPix (was 0.5×) → sharper masks
- *  • 'high' internal resolution (was 'medium') → finer detail
- *  • Professional soft-alpha matting → smooth edges, no hard cutouts
- *  • Color-confidence edge refinement → hair captured correctly
+ * All existing tool screens import from here (unchanged) and automatically get:
+ *  • Multi-model fallback: BiRefNet → RMBG-2.0 → U2Net → IS-Net
+ *  • Professional soft-alpha matting — smooth edges, no hard cutouts
+ *  • Hole fill + SAM2 trimap + quad-pass guided filter + hair refinement
+ *  • Color decontamination — no white/blue halo
  *
  * 100% offline after first model load. No photo or pixel data ever leaves device.
  */
 export { warmUpSegmentation as warmUpSegmentationModel } from '@/lib/ai/services/SegmentationService';
+export type { QualityMode } from '@/lib/ai/services/SegmentationService';
 
 import {
   segmentSubject,
   removeBackgroundPro,
   blurBackgroundPro,
+  type QualityMode,
 } from '@/lib/ai/services/SegmentationService';
 import { blurPixels } from './pixelOps';
 import type { BackgroundPreset } from './types';
@@ -33,7 +35,7 @@ export interface SegmentationResult {
 
 /**
  * Backward-compatible `segmentPerson`. Returns {mask, centroid} as before.
- * Internally now uses higher-quality BodyPix + soft-alpha matting.
+ * Internally uses the full multi-model ONNX pipeline.
  */
 export async function segmentPerson(uri: string): Promise<SegmentationResult> {
   const result = await segmentSubject(uri);
@@ -44,9 +46,12 @@ export async function segmentPerson(uri: string): Promise<SegmentationResult> {
 }
 
 const BG_COLORS: Record<string, [number, number, number]> = {
-  white: [255, 255, 255],
-  blue:  [0,   51,  153],
-  red:   [178, 34,  34],
+  white:  [255, 255, 255],
+  blue:   [0,   51,  153],
+  red:    [178, 34,  34],
+  black:  [0,   0,   0],
+  green:  [0,   128, 0],
+  yellow: [255, 220, 0],
 };
 
 /**
@@ -58,7 +63,8 @@ export async function removeBackground(
   preset: BackgroundPreset,
   customColor?: [number, number, number],
   onProgress?: (pct: number) => void,
-): Promise<{ uri: string; width: number; height: number }> {
+  quality: QualityMode = 'standard',
+): Promise<{ uri: string; width: number; height: number; modelName?: string }> {
   let bgColor: [number, number, number] | null = null;
   if (preset === 'transparent') {
     bgColor = null;
@@ -67,12 +73,11 @@ export async function removeBackground(
   } else {
     bgColor = BG_COLORS[preset as string] ?? [255, 255, 255];
   }
-  return removeBackgroundPro(uri, bgColor, onProgress);
+  return removeBackgroundPro(uri, bgColor, onProgress, quality);
 }
 
 /**
- * Blurs background while keeping the subject sharp — now with soft-alpha
- * compositing so the subject/background boundary feathers naturally.
+ * Blurs background while keeping the subject sharp.
  */
 export async function blurBackground(
   uri: string,
