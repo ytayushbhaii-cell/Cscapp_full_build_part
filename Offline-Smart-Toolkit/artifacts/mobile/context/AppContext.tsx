@@ -199,12 +199,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       AsyncStorage.getItem(FAV_KEY),
       AsyncStorage.getItem(RECENT_KEY),
     ]).then(([favRaw, recentRaw]) => {
-      if (favRaw)    setFavoriteIds(JSON.parse(favRaw));
-      if (recentRaw) setRecentFiles(JSON.parse(recentRaw));
+      try {
+        if (favRaw) {
+          const parsed = JSON.parse(favRaw);
+          if (Array.isArray(parsed)) setFavoriteIds(parsed);
+        }
+      } catch {
+        // Corrupted data — clear it and start fresh
+        AsyncStorage.removeItem(FAV_KEY);
+      }
+      try {
+        if (recentRaw) {
+          const parsed = JSON.parse(recentRaw);
+          if (Array.isArray(parsed)) setRecentFiles(parsed);
+        }
+      } catch {
+        AsyncStorage.removeItem(RECENT_KEY);
+      }
+    }).catch(() => {
+      // AsyncStorage unavailable — continue with empty state
     });
 
     // Load top tools separately (non-blocking)
-    getTopTools(10).then((top) => setTopToolIds(top.map((t) => t.toolId)));
+    getTopTools(10)
+      .then((top) => setTopToolIds(top.map((t) => t.toolId)))
+      .catch(() => {});
   }, []);
 
   // ── Favorites ─────────────────────────────────────────────────────────────

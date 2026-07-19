@@ -37,12 +37,18 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [isReady,       setReady]  = useState(false);
 
   useEffect(() => {
-    loadAllSettings().then((s) => {
-      setLang(s.language);
-      setPrint(s.printSize);
-      setFolder(s.defaultFolder);
-      setReady(true);
-    });
+    loadAllSettings()
+      .then((s) => {
+        setLang(s.language);
+        setPrint(s.printSize);
+        setFolder(s.defaultFolder);
+      })
+      .catch(() => {
+        // Use defaults if AsyncStorage fails
+      })
+      .finally(() => {
+        setReady(true);
+      });
   }, []);
 
   const handleSetLanguage = useCallback(async (v: LanguageValue) => {
