@@ -40,8 +40,15 @@ import { guidedFilterTriplePass } from './guidedFilter';
 import { sam2StyleRefinement } from './maskRefine';
 import { erode, dilate } from './maskRefine';
 import { applyEdgePostProcessing } from './edgeOps';
-import { removeWhiteHalo, erodeAlphaEdge, removeSpeckles } from './haloRemoval';
+import {
+  removeWhiteHalo,
+  erodeAlphaEdge,
+  removeSpeckles,
+  eliminateSolitaryFringePixels,
+  premultipliedColorClamp,
+} from './haloRemoval';
 import { guidedFilterRGBA } from './guidedFilter';
+import { logAlphaStats } from '../debug/maskDebug';
 
 // ─── Separable box blur on a Float32 mono-channel ────────────────────────────
 
@@ -225,6 +232,9 @@ export function refineAlpha(
 ): Float32Array {
   let alpha = coarseAlpha;
 
+  // ── Stats: coarse alpha from model (before any matting) ──────────────────
+  logAlphaStats('coarse (pre-matte)', alpha, w, h);
+
   // Stage 1: Fill subject holes (morphological close)
   // Skipped for very small images where it would distort results
   if (!opts.skipHoleFill && w >= 128 && h >= 128) {
@@ -238,6 +248,8 @@ export function refineAlpha(
   // Stage 3: Quad-pass guided filter — sub-pixel + micro-strand precision
   if (w >= 64 && h >= 64) {
     alpha = guidedFilterTriplePass(pixels, alpha, w, h);
+    // ── Stats: after guided filter (most impactful stage) ──────────────────
+    logAlphaStats('post guided-filter', alpha, w, h);
   }
 
   // Stage 4: Hair & fine-detail refinement — always active (was HD-only)
@@ -249,6 +261,9 @@ export function refineAlpha(
   // Stage 5: Edge polish — adaptive feather + anti-aliasing + S-curve + hard-clip
   const fPx = Math.max(3, featherRadius(w, h));
   alpha = applyEdgePostProcessing(alpha, w, h, fPx);
+
+  // ── Stats: final refined alpha (ready for compositing) ───────────────────
+  logAlphaStats('final (post-matte) ', alpha, w, h);
 
   return alpha;
 }

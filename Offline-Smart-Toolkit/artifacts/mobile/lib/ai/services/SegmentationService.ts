@@ -62,6 +62,9 @@ import {
 } from './ImagePreprocessor';
 import { routeImage, type RoutingDecision } from './ImageRouter';
 import { refineMaskWithBEN2, isBEN2Available, warmUpBEN2 } from './BEN2Backend';
+import { saveMask, logAlphaStats, clearMasks } from '../debug/maskDebug';
+
+export { clearMasks };
 
 export type QualityMode = 'standard' | 'hd';
 
@@ -140,31 +143,23 @@ async function decodeWeb(uri: string): Promise<DecodeResult> {
   const origW = img.naturalWidth;
   const origH = img.naturalHeight;
 
-  // Original-resolution canvas — for final compositing
-  const origCanvas = new OffscreenCanvas(origW, origH);
-  const origCtx    = origCanvas.getContext('2d')!;
-  origCtx.drawImage(img, 0, 0);
+  // Decode at the full original resolution.
+  // Downscaling is intentionally disabled — each ONNX model handles its own
+  // internal input resize (see runModel → resizeRGBABilinear to cfg.inputSize).
+  // Running the pipeline at full resolution maximises guided-filter quality and
+  // ensures refineAlpha() operates on maximum detail.
+  const canvas = new OffscreenCanvas(origW, origH);
+  const ctx    = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
   const origPixels = new Uint8ClampedArray(
-    origCtx.getImageData(0, 0, origW, origH).data,
+    ctx.getImageData(0, 0, origW, origH).data,
   );
 
-  // Model-resolution canvas — for inference
-  const maxSide = Math.max(origW, origH);
-  const scale   = maxSide > MAX_MODEL_SIDE ? MAX_MODEL_SIDE / maxSide : 1;
-  const modelW  = Math.max(1, Math.round(origW * scale));
-  const modelH  = Math.max(1, Math.round(origH * scale));
+  console.info(`[Segmentation] Image decoded at full resolution: ${origW}×${origH}`);
 
-  let modelPixels: Uint8ClampedArray;
-  if (scale < 1) {
-    const mc   = new OffscreenCanvas(modelW, modelH);
-    const mCtx = mc.getContext('2d')!;
-    mCtx.drawImage(img, 0, 0, modelW, modelH);
-    modelPixels = new Uint8ClampedArray(mCtx.getImageData(0, 0, modelW, modelH).data);
-  } else {
-    modelPixels = origPixels;
-  }
-
-  return { modelPixels, modelW, modelH, origPixels, origW, origH };
+  // modelPixels === origPixels: no pre-decode downscale.
+  // runModel in onnxBackend resizes to cfg.inputSize (e.g. 1024) before inference.
+  return { modelPixels: origPixels, modelW: origW, modelH: origH, origPixels, origW, origH };
 }
 
 async function decodeNative(uri: string): Promise<DecodeResult> {
@@ -484,6 +479,7 @@ export async function removeBackgroundPro(
 
       // Route through onnxAlpha so the routing decision's preferred model order
       // is actually enforced at inference time (low-RAM → RMBG-2.0 first, etc.)
+      const inferenceStart = Date.now();
       const result = await onnxAlpha(decoded, analysis, routingDecision, signal);
       checkAbort(signal);
 
@@ -494,6 +490,14 @@ export async function removeBackgroundPro(
           `Segmentation model failed${detail}. Download AI models and restart.`,
         );
       }
+      const inferenceMs = Date.now() - inferenceStart;
+      console.info(
+        `[Segmentation] ✅ ${result.modelName} EXECUTED — ` +
+        `${decoded.origW}×${decoded.origH}px in ${inferenceMs}ms`,
+      );
+      // Save raw ONNX output for inspection (non-blocking)
+      saveMask('1_raw_onnx', result.alpha, decoded.origW, decoded.origH);
+
       step('detect', 'done');
       report(55);
       modelName = result.modelName;
@@ -507,6 +511,7 @@ export async function removeBackgroundPro(
         report(60);
         checkAbort(signal);
 
+        const ben2Start = Date.now();
         coarseAlpha = await refineMaskWithBEN2(
           decoded.modelPixels,
           decoded.origPixels,
@@ -518,9 +523,19 @@ export async function removeBackgroundPro(
           signal,
         );
         checkAbort(signal);
+        console.info(
+          `[Segmentation] ✅ BEN2 EXECUTED — ` +
+          `boundary refined in ${Date.now() - ben2Start}ms`,
+        );
+        // Save post-BEN2 mask for comparison (non-blocking)
+        saveMask('2_post_ben2', coarseAlpha, decoded.origW, decoded.origH);
+
         step('ben2', 'done');
         report(70);
         modelName = `${result.modelName} + BEN2`;
+      } else {
+        console.info('[Segmentation] BEN2 skipped — saving coarse alpha as-is');
+        saveMask('2_post_ben2', coarseAlpha, decoded.origW, decoded.origH);
       }
 
       // ── Stage 5: Refine Alpha (guided filter + hair pass) ────────────────
@@ -528,7 +543,11 @@ export async function removeBackgroundPro(
       report(73);
       checkAbort(signal);
 
+      const matteStart = Date.now();
       alpha = refineAlpha(coarseAlpha, decoded.origPixels, decoded.origW, decoded.origH, { hd });
+      console.info(`[Segmentation] ✅ Alpha matting done in ${Date.now() - matteStart}ms`);
+      // Save final refined alpha for comparison against raw ONNX output (non-blocking)
+      saveMask('3_final_alpha', alpha, decoded.origW, decoded.origH);
       checkAbort(signal);
       step('refine', 'done');
       report(84);
