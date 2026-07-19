@@ -51,6 +51,12 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "357f31b8-8a40-4286-8d50-f84001690517"
+      }
+    },
+    "owner": "testbyais-team"
   }
 }
