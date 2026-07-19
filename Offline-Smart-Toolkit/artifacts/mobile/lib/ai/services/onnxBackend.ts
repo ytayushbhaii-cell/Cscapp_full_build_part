@@ -3,30 +3,37 @@
  *
  * ─── Model Priority (highest → lowest quality) ───────────────────────────────
  *  1. BiRefNet   (birefnet-q.onnx, 44 MB)  — best hair/edge quality
- *  2. RMBG-2.0   (rmbg-2.0.onnx, when present)
- *  3. U2Net-P    (u2netp.onnx, 4.4 MB)     — fast general-purpose
- *  4. IS-Net     (isnet-general.onnx, when present)
+ *  2. RMBG-2.0   (rmbg-2.0.onnx)           — high-quality InSPyReNet
+ *  3. U2Net-P    (u2netp.onnx, 4.4 MB)     — fast general-purpose fallback
+ *  4. IS-Net     (isnet-general.onnx)       — complex-scene accuracy
  *
- * ─── How it works ────────────────────────────────────────────────────────────
- * Each model file is HEAD-checked before loading. Missing or unreachable
- * models are silently skipped and the next candidate is tried. The first
- * successfully loaded model is used for all subsequent inferences (cached).
+ * ─── Model loading ────────────────────────────────────────────────────────────
+ *  1. Check IndexedDB cache (ModelDownloadService.web.ts)
+ *  2. If cached → pass ArrayBuffer directly to ORT (zero re-fetch)
+ *  3. If not cached → fall back to same-origin URL fetch (first run / dev)
+ *  Models missing from both cache and URL are silently skipped.
  *
- * ─── Model files ─────────────────────────────────────────────────────────────
- * Place model ONNX files in public/models/:
- *   public/models/birefnet-q.onnx       → BiRefNet (bundled, 44 MB)
- *   public/models/rmbg-2.0.onnx         → RMBG-2.0 (optional)
- *   public/models/u2netp.onnx           → U2Net-Portrait (bundled, 4.4 MB)
- *   public/models/isnet-general.onnx    → IS-Net (optional)
- *
- * ─── 100% offline ────────────────────────────────────────────────────────────
- * All models and ORT WASM binaries are served from the same origin.
- * No pixel ever leaves the device.
+ * ─── 100% offline after first model install ──────────────────────────────────
+ * Once models are stored in IndexedDB via ModelDownloadGate, all subsequent
+ * processing is fully offline — no network activity whatsoever.
  */
 
 import { Platform } from 'react-native';
 import { loadOnnxRuntime } from './ortLoader';
 import { modelRegistry } from '../ModelRegistry';
+
+// ─── Lazy import of download service (web only) ───────────────────────────────
+
+async function getDownloadService() {
+  if (Platform.OS !== 'web') return null; // ONNX on native is task #2
+  try {
+    // Import via platform entrypoint — Metro resolves .web.ts / .native.ts automatically
+    const mod = await import('./ModelDownloadService');
+    return mod.modelDownloadService;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Model registry ───────────────────────────────────────────────────────────
 
@@ -57,10 +64,9 @@ const MODEL_CONFIGS: Record<OnnxModelId, ModelConfig> = {
     publicPath: '/models/birefnet-q.onnx',
     urlEnvVar: 'EXPO_PUBLIC_BIREFNET_MODEL_URL',
     inputSize: 1024,
-    // birefnet-q.onnx bakes the Normalize op into the graph — divide by 255 only.
     mean: [0, 0, 0],
     std:  [1, 1, 1],
-    outputIsProbability: false, // sigmoid baked in; auto-detected at runtime
+    outputIsProbability: false,
     minFileSizeBytes: 1_000_000,
   },
   /** RMBG-2.0 — high-quality InSPyReNet-based model */
@@ -82,10 +88,9 @@ const MODEL_CONFIGS: Record<OnnxModelId, ModelConfig> = {
     publicPath: '/models/u2netp.onnx',
     urlEnvVar: 'EXPO_PUBLIC_U2NET_MODEL_URL',
     inputSize: 320,
-    // Standard ImageNet normalization (NOT baked into this ONNX export)
     mean: [0.485, 0.456, 0.406],
     std:  [0.229, 0.224, 0.225],
-    outputIsProbability: true, // sigmoid already in graph
+    outputIsProbability: true,
     minFileSizeBytes: 100_000,
   },
   /** IS-Net — high-accuracy for complex scenes */
@@ -97,7 +102,7 @@ const MODEL_CONFIGS: Record<OnnxModelId, ModelConfig> = {
     inputSize: 1024,
     mean: [0.5, 0.5, 0.5],
     std:  [1.0, 1.0, 1.0],
-    outputIsProbability: false, // needs sigmoid
+    outputIsProbability: false,
     minFileSizeBytes: 1_000_000,
   },
 };
@@ -146,10 +151,10 @@ function getWasmDir(): string {
   return '/ort-wasm/';
 }
 
-// ─── Preflight check ──────────────────────────────────────────────────────────
+// ─── Preflight check (URL fallback only) ─────────────────────────────────────
 
-/** Returns true if the model file is reachable and large enough. Silent on error. */
-async function isModelAvailable(cfg: ModelConfig): Promise<boolean> {
+/** Returns true if the model file is reachable at URL. Silent on error. */
+async function isModelAvailableAtUrl(cfg: ModelConfig): Promise<boolean> {
   const url = getModelUrl(cfg);
   try {
     const res = await fetch(url, { method: 'HEAD' });
@@ -184,7 +189,7 @@ async function ensureOrtConfigured(): Promise<any> {
   return ort;
 }
 
-// ─── Session loader ───────────────────────────────────────────────────────────
+// ─── Session loader — cache-first ────────────────────────────────────────────
 
 async function loadModelSession(id: OnnxModelId): Promise<OnnxSession | null> {
   if (Platform.OS !== 'web') return null;
@@ -192,28 +197,43 @@ async function loadModelSession(id: OnnxModelId): Promise<OnnxSession | null> {
   if (!cfg) return null;
 
   modelRegistry.setStatus(id, 'ai-loading');
-  console.info(`[ONNX] Trying ${cfg.name} at ${cfg.publicPath}…`);
+  console.info(`[ONNX] Loading ${cfg.name}…`);
 
   try {
-    const available = await isModelAvailable(cfg);
+    const ort = await ensureOrtConfigured();
+    if (!ort) { modelRegistry.setStatus(id, 'ai-unavailable'); return null; }
+
+    const sessionOptions = {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all',
+    };
+
+    // ── 1. Try IndexedDB cache first ─────────────────────────────────────────
+    const svc = await getDownloadService();
+    if (svc) {
+      const buffer = await svc.getModelData(id) as ArrayBuffer | null;
+      if (buffer && buffer.byteLength >= cfg.minFileSizeBytes) {
+        console.info(`[ONNX] ✅ ${cfg.name} loaded from device cache (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+        const session = await ort.InferenceSession.create(buffer, sessionOptions);
+        modelRegistry.setStatus(id, 'ai-cached');
+        console.info(`[ONNX] ✅ ${cfg.name} ready — inputs: ${session.inputNames?.join(', ')}`);
+        return session;
+      }
+    }
+
+    // ── 2. Fall back to same-origin URL (dev mode / first run) ───────────────
+    const available = await isModelAvailableAtUrl(cfg);
     if (!available) {
-      console.info(`[ONNX] ${cfg.name}: not available at ${cfg.publicPath} — skipping`);
+      console.info(`[ONNX] ${cfg.name}: not in cache and not reachable at URL — skipping`);
       modelRegistry.setStatus(id, 'ai-unavailable');
       return null;
     }
 
-    const ort = await ensureOrtConfigured();
-    if (!ort) { modelRegistry.setStatus(id, 'ai-unavailable'); return null; }
-
     const modelUrl = getModelUrl(cfg);
-    const session = await ort.InferenceSession.create(modelUrl, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-    });
-
+    const session  = await ort.InferenceSession.create(modelUrl, sessionOptions);
     modelRegistry.setStatus(id, 'ai-cached');
     console.info(
-      `[ONNX] ✅ ${cfg.name} loaded — ` +
+      `[ONNX] ✅ ${cfg.name} loaded from URL — ` +
       `inputs: ${session.inputNames?.join(', ')}, outputs: ${session.outputNames?.join(', ')}`,
     );
     return session;
@@ -240,7 +260,6 @@ function getOrLoadSession(id: OnnxModelId): Promise<OnnxSession | null> {
  */
 export function warmUpOnnxModels(): void {
   if (Platform.OS !== 'web') return;
-  // Start loading in priority order; each is independent
   for (const id of PRIORITY_ORDER) {
     getOrLoadSession(id).catch(() => {});
   }
@@ -316,6 +335,75 @@ function upsampleAlpha(
   return out;
 }
 
+// ─── Low-light / blur enhancement preprocessing ───────────────────────────────
+
+/**
+ * Detects whether an image is low-light or low-contrast and returns enhanced
+ * pixels suitable for segmentation inference.
+ *
+ * When a photo is dark or hazy, segmentation models struggle to distinguish
+ * subject from background because contrast is low.  A simple brightness
+ * normalisation pass before inference dramatically improves mask quality.
+ *
+ * Enhancement is applied ONLY to the model-resolution copy (not the original)
+ * so the output PNG always preserves the original pixel values.
+ *
+ * @returns enhanced pixels if enhancement was needed, or the original unchanged
+ */
+export function enhanceForSegmentation(
+  pixels: Uint8ClampedArray,
+  w: number,
+  h: number,
+): Uint8ClampedArray {
+  const n = w * h;
+
+  // Compute luminance statistics
+  let sumL = 0, minL = 255, maxL = 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    const l = 0.299 * pixels[o] + 0.587 * pixels[o + 1] + 0.114 * pixels[o + 2];
+    sumL += l;
+    if (l < minL) minL = l;
+    if (l > maxL) maxL = l;
+  }
+  const avgL    = sumL / n;
+  const contrastRange = maxL - minL;
+
+  // Thresholds: skip if image is already well-lit and high-contrast
+  const needsBrighten  = avgL < 80;
+  const needsContrast  = contrastRange < 100;
+  if (!needsBrighten && !needsContrast) return pixels;
+
+  console.info(
+    `[ONNX] Low-light detected (avg=${avgL.toFixed(0)}, range=${contrastRange.toFixed(0)}) — ` +
+    'applying enhancement for segmentation',
+  );
+
+  const out   = new Uint8ClampedArray(pixels.length);
+  // Auto-levels: stretch histogram to [0, 255] for max contrast
+  const lo    = minL, hi = maxL;
+  const scale = hi > lo ? 255 / (hi - lo) : 1;
+  // Additional gamma boost for very dark images
+  const gamma = avgL < 50 ? 1.8 : avgL < 80 ? 1.4 : 1.0;
+  const lutSize = 256;
+  const lut = new Uint8ClampedArray(lutSize);
+  for (let i = 0; i < lutSize; i++) {
+    const levelled = Math.max(0, Math.min(255, (i - lo) * scale));
+    lut[i] = gamma !== 1.0
+      ? Math.round(Math.pow(levelled / 255, 1 / gamma) * 255)
+      : Math.round(levelled);
+  }
+
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    out[o]     = lut[pixels[o]];
+    out[o + 1] = lut[pixels[o + 1]];
+    out[o + 2] = lut[pixels[o + 2]];
+    out[o + 3] = pixels[o + 3];
+  }
+  return out;
+}
+
 // ─── Generic model inference ──────────────────────────────────────────────────
 
 export interface OnnxResult {
@@ -336,16 +424,24 @@ async function runModel(
   h: number,
   origW: number,
   origH: number,
+  signal?: AbortSignal,
 ): Promise<OnnxResult> {
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
   const ort = await loadOnnxRuntime();
   const sz  = cfg.inputSize;
 
+  // Apply low-light enhancement to model-resolution pixels only
+  const enhanced = enhanceForSegmentation(pixels, w, h);
+
   // Resize to model input size
   const resized = (w !== sz || h !== sz)
-    ? resizeRGBABilinear(pixels, w, h, sz, sz)
-    : pixels;
+    ? resizeRGBABilinear(enhanced, w, h, sz, sz)
+    : enhanced;
 
-  const tensorData = toNCHWTensor(resized, sz, sz, cfg.mean, cfg.std);
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+  const tensorData  = toNCHWTensor(resized, sz, sz, cfg.mean, cfg.std);
   const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, sz, sz]);
   const inputName   = session.inputNames[0] ?? 'input';
   const feeds: Record<string, any> = { [inputName]: inputTensor };
@@ -355,9 +451,9 @@ async function runModel(
   const output     = results[outputName];
   if (!output) throw new Error(`No output tensor from ${cfg.name}`);
 
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+
   const rawData = output.data as Float32Array;
-  // Shape: [1, 1, H, W] — extract the [H*W] values
-  // rawData.length should be sz*sz
   const maskLen = sz * sz;
   const flatData = rawData.length === maskLen
     ? rawData
@@ -403,35 +499,44 @@ export async function runSegmentationWithFallback(
   h: number,
   origW: number,
   origH: number,
+  signal?: AbortSignal,
 ): Promise<OnnxResult | null> {
+  if (signal?.aborted) return null;
+
   // If we already found a working model, use it directly
   if (_activeModelId) {
     const session = await getOrLoadSession(_activeModelId);
     if (session) {
       try {
-        const result = await runModel(session, MODEL_CONFIGS[_activeModelId], pixels, w, h, origW, origH);
+        const result = await runModel(
+          session, MODEL_CONFIGS[_activeModelId], pixels, w, h, origW, origH, signal,
+        );
         modelRegistry.setStatus(_activeModelId, 'ai-cached');
         return result;
-      } catch (e) {
+      } catch (e: any) {
+        if (signal?.aborted || e?.name === 'AbortError') return null;
         console.warn(`[ONNX] Active model ${_activeModelId} failed:`, e);
-        _activeModelId = null; // reset and re-discover
+        _activeModelId = null;
       }
     }
   }
 
   // Try each model in priority order
   for (const id of PRIORITY_ORDER) {
+    if (signal?.aborted) return null;
     const session = await getOrLoadSession(id);
     if (!session) continue;
     try {
-      const result = await runModel(session, MODEL_CONFIGS[id], pixels, w, h, origW, origH);
+      const result = await runModel(session, MODEL_CONFIGS[id], pixels, w, h, origW, origH, signal);
+      if (signal?.aborted) return null;
       _activeModelId = id;
       modelRegistry.setStatus(id, 'ai-cached');
       console.info(`[ONNX] ✅ Using ${MODEL_CONFIGS[id].name} (${id})`);
       return result;
-    } catch (e) {
+    } catch (e: any) {
+      if (signal?.aborted || e?.name === 'AbortError') return null;
       console.warn(`[ONNX] ${id} inference failed:`, e);
-      sessionCache.delete(id); // allow reload on next attempt
+      sessionCache.delete(id);
     }
   }
 

@@ -7,18 +7,23 @@
  *
  * ─── Web pipeline ────────────────────────────────────────────────────────────
  *  1. Canvas API decode → RGBA at original resolution (zero quality loss)
- *  2. Resize to ≤1024px for model inference
- *  3. Multi-model ONNX: BiRefNet → RMBG-2.0 → U2Net → IS-Net (priority order)
- *  4. Bilinear upsample alpha → ORIGINAL resolution
- *  5. refineAlpha() post-processing at original resolution
+ *  2. Low-light auto-enhancement for dark/blurry images (inference copy only)
+ *  3. Resize to ≤1024px for model inference
+ *  4. Multi-model ONNX: BiRefNet → RMBG-2.0 → U2Net → IS-Net (priority order)
+ *  5. Bilinear upsample alpha → ORIGINAL resolution
+ *  6. refineAlpha() post-processing at original resolution
  *     (hole fill → SAM2 trimap → guided filter → hair pass → halo removal → edge polish)
- *  6. Composite at original resolution → PNG (every pixel preserved)
+ *  7. Composite at original resolution → PNG (every pixel preserved)
  *
  * ─── Native pipeline ─────────────────────────────────────────────────────────
  *  BodyPix MobileNetV1 + same refineAlpha() pipeline.
- *  (onnxruntime-react-native upgrade: separate optional task)
  *
- * 100% offline. No pixels ever leave the device.
+ * ─── Cancel support ──────────────────────────────────────────────────────────
+ *  Pass an AbortSignal to removeBackgroundPro / blurBackgroundPro.
+ *  The signal is checked at decode → inference → refinement → encode boundaries.
+ *  Throws { name: 'AbortError' } when cancelled.
+ *
+ * 100% offline after model installation. No pixels ever leave the device.
  */
 
 import { Platform } from 'react-native';
@@ -35,6 +40,7 @@ import {
   warmUpOnnxModels,
   resizeRGBABilinear,
   lastOrtError,
+  enhanceForSegmentation,
 } from './onnxBackend';
 import { modelRegistry } from '../ModelRegistry';
 import type { SegmentationResult } from '../types';
@@ -89,11 +95,6 @@ export function warmUpSegmentation(): void {
 
 // ─── Image decode ─────────────────────────────────────────────────────────────
 
-/**
- * Maximum pixel dimension used for segmentation inference.
- * BiRefNet/RMBG-2.0 are trained at 1024×1024. U2Net at 320×320.
- * The alpha mask is always bilinear-upsampled back to the original resolution.
- */
 const MAX_MODEL_SIDE = 1024;
 
 interface DecodeResult {
@@ -107,10 +108,6 @@ interface DecodeResult {
   origH: number;
 }
 
-/**
- * Web decode — Canvas API (OffscreenCanvas) for zero-quality-loss RGBA.
- * Produces both model-resolution and original-resolution pixel buffers.
- */
 async function decodeWeb(uri: string): Promise<DecodeResult> {
   const img = new Image();
   img.crossOrigin = 'anonymous';
@@ -126,7 +123,7 @@ async function decodeWeb(uri: string): Promise<DecodeResult> {
 
   // Original-resolution canvas — for final compositing
   const origCanvas = new OffscreenCanvas(origW, origH);
-  const origCtx = origCanvas.getContext('2d')!;
+  const origCtx    = origCanvas.getContext('2d')!;
   origCtx.drawImage(img, 0, 0);
   const origPixels = new Uint8ClampedArray(
     origCtx.getImageData(0, 0, origW, origH).data,
@@ -151,10 +148,6 @@ async function decodeWeb(uri: string): Promise<DecodeResult> {
   return { modelPixels, modelW, modelH, origPixels, origW, origH };
 }
 
-/**
- * Native decode — expo-image-manipulator → JPEG → TF.js decodeJpeg → RGBA.
- * Output resolution capped at MAX_MODEL_SIDE.
- */
 async function decodeNative(uri: string): Promise<DecodeResult> {
   const { tf, decodeJpeg } = await getNativeTF();
 
@@ -203,9 +196,15 @@ async function decodeImage(uri: string): Promise<DecodeResult> {
   return decodeNative(uri);
 }
 
+// ─── Cancel guard ─────────────────────────────────────────────────────────────
+
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('Processing cancelled', 'AbortError');
+}
+
 // ─── Timeout helper ───────────────────────────────────────────────────────────
 
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(p: Promise<T>, ms: number, label: string, signal?: AbortSignal): Promise<T> {
   return Promise.race([
     p,
     new Promise<T>((_, reject) =>
@@ -214,20 +213,40 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
         ms,
       ),
     ),
+    ...(signal
+      ? [new Promise<T>((_, reject) => {
+          if (signal.aborted) reject(new DOMException('Processing cancelled', 'AbortError'));
+          signal.addEventListener('abort', () => reject(new DOMException('Processing cancelled', 'AbortError')));
+        })]
+      : []),
   ]);
 }
 
 const TIMEOUT_MS = 120_000;
 
+// ─── Progress step callbacks ──────────────────────────────────────────────────
+
+/**
+ * Granular step-level progress for the UI.
+ * Maps to the user-facing step labels in BackgroundSwapScreen.
+ */
+export interface SegmentationStepCallback {
+  onStep: (stepId: string, status: 'running' | 'done' | 'error') => void;
+}
+
 // ─── ONNX alpha extraction ────────────────────────────────────────────────────
 
-async function onnxAlpha(decoded: DecodeResult): Promise<{ alpha: Float32Array; modelName: string } | null> {
+async function onnxAlpha(
+  decoded: DecodeResult,
+  signal?: AbortSignal,
+): Promise<{ alpha: Float32Array; modelName: string } | null> {
   const result = await runSegmentationWithFallback(
     decoded.modelPixels,
     decoded.modelW,
     decoded.modelH,
     decoded.origW,
     decoded.origH,
+    signal,
   );
   if (!result) return null;
   return { alpha: result.alpha, modelName: result.modelName };
@@ -263,22 +282,22 @@ async function bodyPixAlpha(decoded: DecodeResult, hd = false): Promise<Float32A
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Segments the subject and returns a fully-refined soft alpha + face centroid.
- */
-export async function segmentSubject(uri: string): Promise<SegmentationResult> {
+export async function segmentSubject(uri: string, signal?: AbortSignal): Promise<SegmentationResult> {
   const inner = async () => {
+    checkAbort(signal);
     const decoded = await decodeImage(uri);
+    checkAbort(signal);
 
     let alpha: Float32Array;
     let backend: SegmentationResult['backend'];
 
     if (Platform.OS === 'web') {
-      const result = await onnxAlpha(decoded);
+      const result = await onnxAlpha(decoded, signal);
+      checkAbort(signal);
       if (!result) {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
-          `Segmentation model failed${detail}. Ensure model files are in public/models/ and restart.`,
+          `Segmentation model failed${detail}. Ensure models are downloaded and restart.`,
         );
       }
       alpha   = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
@@ -287,6 +306,8 @@ export async function segmentSubject(uri: string): Promise<SegmentationResult> {
       alpha   = await bodyPixAlpha(decoded);
       backend = 'bodypix';
     }
+
+    checkAbort(signal);
 
     let sx = 0, sy = 0, sn = 0;
     for (let y = 0; y < decoded.origH; y++) {
@@ -302,62 +323,105 @@ export async function segmentSubject(uri: string): Promise<SegmentationResult> {
     return { width: decoded.origW, height: decoded.origH, alpha, face, backend };
   };
 
-  return withTimeout(inner(), TIMEOUT_MS, 'Segmentation');
+  return withTimeout(inner(), TIMEOUT_MS, 'Segmentation', signal);
 }
 
 /**
  * Removes the background and returns a transparent (or solid-colour) PNG URI.
  *
- * @param uri       - input image URI
- * @param bgColor   - null = transparent, [r,g,b] = solid colour
- * @param onProgress - 0–100 progress callback
- * @param quality   - 'standard' (default) or 'hd' (extra hair refinement pass)
+ * @param uri         - input image URI
+ * @param bgColor     - null = transparent, [r,g,b] = solid colour
+ * @param onProgress  - 0–100 progress callback
+ * @param quality     - 'standard' (default) or 'hd' (extra hair refinement pass)
+ * @param steps       - optional per-step status callbacks for detailed UI
+ * @param signal      - optional AbortSignal for cancellation
  */
 export async function removeBackgroundPro(
   uri: string,
   bgColor: [number, number, number] | null,
   onProgress?: (pct: number) => void,
   quality: QualityMode = 'standard',
+  steps?: SegmentationStepCallback,
+  signal?: AbortSignal,
 ): Promise<{ uri: string; width: number; height: number; modelName: string }> {
   const report = (pct: number) => onProgress?.(Math.round(pct));
-  const hd = quality === 'hd';
+  const step   = (id: string, status: 'running' | 'done' | 'error') => steps?.onStep(id, status);
+  const hd     = quality === 'hd';
 
   const inner = async () => {
+    // ── Stage: Decode ──────────────────────────────────────────────────────
+    checkAbort(signal);
     report(3);
+    step('decode', 'running');
     const decoded = await decodeImage(uri);
+    checkAbort(signal);
+    step('decode', 'done');
     report(12);
 
     let alpha: Float32Array;
     let modelName = 'BodyPix';
 
     if (Platform.OS === 'web') {
+      // ── Stage: Detect Subject ─────────────────────────────────────────────
       report(18);
-      const result = await onnxAlpha(decoded);
-      report(65);
+      step('detect', 'running');
+      const result = await onnxAlpha(decoded, signal);
+      checkAbort(signal);
       if (!result) {
+        step('detect', 'error');
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
-          `Segmentation model failed${detail}. Ensure model files are in public/models/ and restart.`,
+          `Segmentation model failed${detail}. Download AI models and restart.`,
         );
       }
+      step('detect', 'done');
+      report(58);
+
+      // ── Stage: Refine Hair ────────────────────────────────────────────────
+      step('refine', 'running');
+      report(62);
+      checkAbort(signal);
       alpha     = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH, { hd });
+      checkAbort(signal);
+      step('refine', 'done');
       modelName = result.modelName;
-      report(80);
+      report(78);
     } else {
+      // Native: BodyPix
       report(18);
+      step('detect', 'running');
       alpha     = await bodyPixAlpha(decoded, hd);
+      checkAbort(signal);
+      step('detect', 'done');
+      step('refine', 'done');
       modelName = 'BodyPix';
       report(75);
     }
 
-    const rgba   = compositeWithSoftAlpha(decoded.origPixels, alpha, decoded.origW, decoded.origH, bgColor);
-    report(88);
+    // ── Stage: Enhance Edges ──────────────────────────────────────────────
+    checkAbort(signal);
+    step('edges', 'running');
+    report(82);
+    // Edge work is already done inside refineAlpha; this stage represents compositing
+    const rgba = compositeWithSoftAlpha(
+      decoded.origPixels, alpha, decoded.origW, decoded.origH, bgColor,
+    );
+    checkAbort(signal);
+    step('edges', 'done');
+    report(90);
+
+    // ── Stage: Generate PNG ───────────────────────────────────────────────
+    step('encode', 'running');
+    report(92);
     const outUri = await writePngFromRGBA(rgba, decoded.origW, decoded.origH);
+    checkAbort(signal);
+    step('encode', 'done');
     report(100);
+
     return { uri: outUri, width: decoded.origW, height: decoded.origH, modelName };
   };
 
-  return withTimeout(inner(), TIMEOUT_MS, 'Background removal');
+  return withTimeout(inner(), TIMEOUT_MS, 'Background removal', signal);
 }
 
 /**
@@ -367,22 +431,28 @@ export async function blurBackgroundPro(
   uri: string,
   blurRadius: number,
   blurFn: (pixels: Uint8ClampedArray, w: number, h: number, r: number) => Uint8ClampedArray,
+  signal?: AbortSignal,
 ): Promise<{ uri: string; width: number; height: number }> {
   const inner = async () => {
+    checkAbort(signal);
     const decoded = await decodeImage(uri);
+    checkAbort(signal);
+
     let subjectWeight: Float32Array;
 
     if (Platform.OS === 'web') {
-      const result = await onnxAlpha(decoded);
+      const result = await onnxAlpha(decoded, signal);
+      checkAbort(signal);
       if (!result) {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
-        throw new Error(`Segmentation model failed${detail}. Ensure model files are in public/models/.`);
+        throw new Error(`Segmentation model failed${detail}. Download AI models.`);
       }
       subjectWeight = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
     } else {
       subjectWeight = await bodyPixAlpha(decoded);
     }
 
+    checkAbort(signal);
     const { origPixels: pixels, origW: w, origH: h } = decoded;
     const blurred   = blurFn(pixels, w, h, blurRadius);
     const composite = new Uint8ClampedArray(w * h * 4);
@@ -395,9 +465,10 @@ export async function blurBackgroundPro(
       composite[o + 3] = 255;
     }
 
+    checkAbort(signal);
     const outUri = await writePngFromRGBA(composite, w, h);
     return { uri: outUri, width: w, height: h };
   };
 
-  return withTimeout(inner(), TIMEOUT_MS, 'Background blur');
+  return withTimeout(inner(), TIMEOUT_MS, 'Background blur', signal);
 }

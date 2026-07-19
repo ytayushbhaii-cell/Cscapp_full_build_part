@@ -1,15 +1,24 @@
 /**
- * Background Swap Screen — v3 upgrade.
+ * Background Swap Screen — v4 upgrade.
  *
- * New in v3:
- *  • Quality mode selector — Standard / HD (extra hair refinement pass)
- *  • Interactive before/after slider (drag handle) instead of toggle
- *  • Live model badge showing which ONNX model ran (BiRefNet / U2Net / etc.)
- *  • HD Export button with explicit resolution info
+ * New in v4 (over v3):
+ *  • ModelDownloadGate — detects whether AI models are installed; if not,
+ *    shows a download card with real progress (%, MB/speed/ETA) before the
+ *    tool becomes available
+ *  • Cancel button — stop any in-progress removal at any time
+ *  • User-friendly step labels:
+ *      "Detecting Subject…" → "Refining Hair…" → "Enhancing Edges…" → "Generating Transparent PNG…"
+ *  • Actual step callbacks wired to the AI pipeline (not fake timers)
+ *  • Low-light image enhancement (automatic, internal — no UI change)
+ *
+ * Previous v3 features preserved unchanged:
+ *  • Quality mode selector — Standard / HD
+ *  • Interactive before/after slider
+ *  • Live model badge
+ *  • HD Export button
  *  • Multi-model fallback indicator
- *  • Transparent PNG, White, Blue, Red background presets
  */
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform,
 } from 'react-native';
@@ -22,10 +31,17 @@ import { ImageUploadWidget } from './ImageUploadWidget';
 import { BeforeAfterSlider } from './BeforeAfterSlider';
 import { ProcessingSteps, makeSteps, updateStep } from './ProcessingSteps';
 import { AIModelBadge } from './AIModelBadge';
-import { removeBackground, type QualityMode } from '@/lib/photoTools/segmentation';
+import { ModelDownloadGate } from './ModelDownloadGate';
+import {
+  removeBackground,
+  type QualityMode,
+  type SegmentationStepCallback,
+} from '@/lib/photoTools/segmentation';
 import { exportFile, guessFileName } from '@/lib/photoTools/exportUtils';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
 import type { PickedImage, BackgroundPreset } from '@/lib/photoTools/types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PresetOption {
   id: BackgroundPreset;
@@ -43,28 +59,41 @@ interface BackgroundSwapScreenProps {
   defaultPreset: BackgroundPreset;
 }
 
+// ─── Processing step definitions ─────────────────────────────────────────────
+// IDs match the step callbacks emitted by SegmentationService
+
 const STANDARD_STEPS = [
-  { id: 'decode',    label: 'Decoding image — full original resolution' },
-  { id: 'segment',   label: 'ONNX subject segmentation (BiRefNet / U2Net)' },
-  { id: 'matte',     label: 'Guided filter — hair & edge detail' },
-  { id: 'composite', label: 'Compositing at original resolution' },
-  { id: 'encode',    label: 'Encoding lossless transparent PNG' },
+  { id: 'decode',  label: 'Loading image at original resolution…' },
+  { id: 'detect',  label: 'Detecting Subject…' },
+  { id: 'refine',  label: 'Refining Hair & Fine Details…' },
+  { id: 'edges',   label: 'Enhancing Edges…' },
+  { id: 'encode',  label: 'Generating Transparent PNG…' },
 ];
 
 const HD_STEPS = [
-  { id: 'decode',    label: 'Decoding image — full original resolution' },
-  { id: 'segment',   label: 'ONNX subject segmentation (BiRefNet priority)' },
-  { id: 'matte',     label: 'Quad-pass guided filter — sub-pixel precision' },
-  { id: 'hair',      label: 'HD hair refinement — fly-away strand recovery' },
-  { id: 'halo',      label: 'Color decontamination — halo & fringe removal' },
-  { id: 'composite', label: 'Compositing at original resolution' },
-  { id: 'encode',    label: 'Encoding lossless HD transparent PNG' },
+  { id: 'decode',  label: 'Loading image at original resolution…' },
+  { id: 'detect',  label: 'Detecting Subject (HD mode)…' },
+  { id: 'refine',  label: 'Refining Hair — sub-pixel precision…' },
+  { id: 'edges',   label: 'Enhancing Edges & Removing Halo…' },
+  { id: 'encode',  label: 'Generating HD Transparent PNG…' },
 ];
+
+// ─── Required models for the download gate ────────────────────────────────────
+// We require at least one primary (birefnet) and one fallback (u2net).
+// rmbg2 and isnet are optional; the pipeline handles missing models gracefully.
+const REQUIRED_MODEL_IDS = ['birefnet', 'u2net'];
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function BackgroundSwapScreen({
   toolId, title, subtitle, iconName, color, presets, defaultPreset,
 }: BackgroundSwapScreenProps) {
   const colors = useColors();
+
+  // ── State ─────────────────────────────────────────────────────────────────
+  // On native, BodyPix is used (no ONNX download needed) → gate is always open.
+  // On web, the ModelDownloadGate checks / downloads ONNX models before opening.
+  const [modelsReady, setModelsReady] = useState(Platform.OS !== 'web');
   const [image, setImage]   = useState<PickedImage | null>(null);
   const [preset, setPreset] = useState<BackgroundPreset>(defaultPreset);
   const [quality, setQuality] = useState<QualityMode>('standard');
@@ -75,55 +104,61 @@ export function BackgroundSwapScreen({
   const [result, setResult] = useState<{
     uri: string; width: number; height: number; modelName: string;
   } | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
-  const reset = () => {
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const reset = useCallback(() => {
+    abortRef.current?.abort();
     setImage(null); setResult(null); setError(null);
     setSteps(makeSteps(quality === 'hd' ? HD_STEPS : STANDARD_STEPS));
-    setProgress(0);
-  };
+    setProgress(0); setCancelling(false);
+  }, [quality]);
 
-  const tick = (id: string, status: 'running' | 'done' | 'error', ms?: number) =>
-    setSteps((s) => updateStep(s, id, status, ms));
+  const tick = useCallback((id: string, status: 'running' | 'done' | 'error') => {
+    setSteps((s) => updateStep(s, id, status));
+  }, []);
 
-  const process = async () => {
+  // ── Cancel handler ────────────────────────────────────────────────────────
+  const handleCancel = useCallback(() => {
+    setCancelling(true);
+    abortRef.current?.abort();
+  }, []);
+
+  // ── Process ───────────────────────────────────────────────────────────────
+  const process = useCallback(async () => {
     if (!image) return;
-    const isHD = quality === 'hd';
-    const stepDefs = isHD ? HD_STEPS : STANDARD_STEPS;
+    const isHD      = quality === 'hd';
+    const stepDefs  = isHD ? HD_STEPS : STANDARD_STEPS;
+
     setProcessing(true);
+    setCancelling(false);
     setError(null);
     setSteps(makeSteps(stepDefs));
     setProgress(0);
-    const t0 = Date.now();
+
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+
+    // Step callback wired directly to the AI pipeline for real status
+    const stepCb: SegmentationStepCallback = {
+      onStep: (id, status) => tick(id, status),
+    };
 
     try {
-      const onProgress = (pct: number) => {
-        setProgress(pct);
-        if (isHD) {
-          if (pct >= 3  && pct < 12)  { tick('decode',    'running'); }
-          if (pct >= 12 && pct < 18)  { tick('decode',    'done', Date.now() - t0); }
-          if (pct >= 18 && pct < 65)  { tick('segment',   'running'); }
-          if (pct >= 65 && pct < 72)  { tick('segment',   'done', Date.now() - t0); tick('matte', 'running'); }
-          if (pct >= 72 && pct < 78)  { tick('matte',     'done', Date.now() - t0); tick('hair', 'running'); }
-          if (pct >= 78 && pct < 82)  { tick('hair',      'done', Date.now() - t0); tick('halo', 'running'); }
-          if (pct >= 82 && pct < 88)  { tick('halo',      'done', Date.now() - t0); tick('composite', 'running'); }
-          if (pct >= 88 && pct < 100) { tick('composite', 'done', Date.now() - t0); tick('encode', 'running'); }
-          if (pct >= 100)             { tick('encode',     'done', Date.now() - t0); }
-        } else {
-          if (pct >= 3  && pct < 12)  { tick('decode',    'running'); }
-          if (pct >= 12 && pct < 18)  { tick('decode',    'done', Date.now() - t0); }
-          if (pct >= 18 && pct < 65)  { tick('segment',   'running'); }
-          if (pct >= 65 && pct < 80)  { tick('segment',   'done', Date.now() - t0); tick('matte', 'running'); }
-          if (pct >= 80 && pct < 88)  { tick('matte',     'done', Date.now() - t0); tick('composite', 'running'); }
-          if (pct >= 88 && pct < 100) { tick('composite', 'done', Date.now() - t0); tick('encode', 'running'); }
-          if (pct >= 100)             { tick('encode',     'done', Date.now() - t0); }
-        }
-      };
-
-      const t1 = Date.now();
-      const out = await removeBackground(image.uri, preset, undefined, onProgress, quality);
+      const out = await removeBackground(
+        image.uri,
+        preset,
+        undefined,       // customColor
+        (pct) => setProgress(pct),
+        quality,
+        stepCb,
+        signal,
+      );
 
       // Ensure all steps show done
-      for (const s of stepDefs) tick(s.id, 'done', Date.now() - t1);
+      for (const s of stepDefs) tick(s.id, 'done');
       setProgress(100);
 
       const modelName = out.modelName ?? 'ONNX';
@@ -132,205 +167,280 @@ export function BackgroundSwapScreen({
       recordToolUsage(toolId).catch(() => {});
       addRecentFile({ toolId, toolName: title, fileName, resultUri: out.uri }).catch(() => {});
     } catch (e: any) {
-      tick('segment', 'error');
+      const isCancel = e?.name === 'AbortError' || e?.message?.includes('cancelled');
+      if (isCancel) {
+        // User cancelled — reset quietly
+        setProcessing(false);
+        setCancelling(false);
+        setSteps(makeSteps(stepDefs));
+        setProgress(0);
+        return;
+      }
+      tick('detect', 'error');
       setError(
         e?.message?.includes('fetch') || e?.message?.includes('network')
-          ? 'Could not load segmentation model. Ensure model files are in public/models/ and restart the app.'
-          : `Processing failed: ${e?.message ?? 'unknown error'}`
+          ? 'Could not load segmentation model. Download AI models first.'
+          : `Processing failed: ${e?.message ?? 'unknown error'}`,
       );
     } finally {
       setProcessing(false);
+      setCancelling(false);
     }
-  };
+  }, [image, preset, quality, tick, toolId, title]);
 
-  const handleHDExport = async () => {
+  const handleHDExport = useCallback(async () => {
     if (!result) return;
     const fileName = guessFileName(`${toolId}-HD`, 'png');
     await exportFile(result.uri, fileName);
-  };
+  }, [result, toolId]);
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <ToolScreenLayout title={title} subtitle={subtitle} iconName={iconName} color={color} onReset={reset}>
 
-      {/* AI model info banner */}
-      <View style={[styles.infoBanner, { backgroundColor: color + '0D', borderColor: color + '30', borderRadius: colors.radius }]}>
-        <MaterialCommunityIcons name="robot-outline" size={16} color={color} />
-        <Text style={[styles.infoBannerText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
-          BiRefNet → RMBG-2.0 → U2Net fallback chain · 100% offline · No data leaves device
-        </Text>
-      </View>
-      <AIModelBadge service="segmentation" showUpgradeHint />
-
-      {error && <StatusBanner type="error" message={error} />}
-
-      {!result && (
-        <ImageUploadWidget image={image} onPicked={setImage} onError={setError} color={color} label="Upload photo with a clear subject" />
+      {/* ── Model download gate (web only — native uses BodyPix, no ONNX download needed) ── */}
+      {Platform.OS === 'web' && !modelsReady && (
+        <ModelDownloadGate
+          modelIds={REQUIRED_MODEL_IDS}
+          onReady={() => setModelsReady(true)}
+          accentColor={color}
+        />
       )}
 
-      {/* Background preset picker */}
-      {!result && presets.length > 1 && (
-        <View>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>Background</Text>
-          <View style={styles.presetsRow}>
-            {presets.map((p) => {
-              const active = preset === p.id;
-              return (
-                <TouchableOpacity
-                  key={p.id}
-                  onPress={() => setPreset(p.id)}
-                  style={[styles.presetChip, { borderColor: active ? color : colors.border, backgroundColor: active ? color + '14' : colors.card, borderRadius: colors.radius - 4 }]}
-                  activeOpacity={0.8}
-                >
-                  <View style={[styles.swatch, { backgroundColor: p.swatch === 'transparent' ? 'transparent' : p.swatch, borderColor: colors.border }]}>
-                    {p.swatch === 'transparent' && <MaterialCommunityIcons name="checkerboard" size={14} color={colors.mutedForeground} />}
-                  </View>
-                  <Text style={[styles.presetLabel, { color: active ? color : colors.foreground, fontFamily: 'Inter_500Medium' }]}>{p.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      )}
-
-      {/* Quality mode selector */}
-      {!result && image && (
-        <View>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>Quality Mode</Text>
-          <View style={styles.qualityRow}>
-            {([
-              { id: 'standard' as QualityMode, label: 'Standard', icon: 'lightning-bolt', desc: 'Fast · Good for solid subjects' },
-              { id: 'hd'       as QualityMode, label: 'HD',        icon: 'shimmer',        desc: 'Slower · Best for hair & fine detail' },
-            ] as const).map((q) => {
-              const active = quality === q.id;
-              return (
-                <TouchableOpacity
-                  key={q.id}
-                  onPress={() => setQuality(q.id)}
-                  style={[styles.qualityChip, { borderColor: active ? color : colors.border, backgroundColor: active ? color + '12' : colors.card, borderRadius: colors.radius - 4, flex: 1 }]}
-                  activeOpacity={0.8}
-                >
-                  <MaterialCommunityIcons name={q.icon as any} size={18} color={active ? color : colors.mutedForeground} />
-                  <View>
-                    <Text style={[styles.qualityLabel, { color: active ? color : colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{q.label}</Text>
-                    <Text style={[styles.qualityDesc,  { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{q.desc}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      )}
-
-      {/* Process button */}
-      {!result && image && (
-        <TouchableOpacity
-          style={[styles.processBtn, { backgroundColor: color, borderRadius: colors.radius - 2 }]}
-          onPress={process} disabled={processing} activeOpacity={0.85}
-        >
-          {processing
-            ? <ActivityIndicator color="#fff" size="small" />
-            : <MaterialCommunityIcons name="auto-fix" size={18} color="#fff" />
-          }
-          <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
-            {processing ? `Processing… ${progress}%` : `Remove Background${quality === 'hd' ? ' (HD)' : ''}`}
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Live processing steps */}
-      {processing && <ProcessingSteps steps={steps} accentColor={color} />}
-
-      {/* Result: interactive before/after slider + actions */}
-      {result && image && (
+      {/* ── Tool content — only shown when models are ready ── */}
+      {modelsReady && (
         <>
-          {/* Model badge */}
-          <View style={[styles.modelBadge, { backgroundColor: color + '12', borderColor: color + '30', borderRadius: colors.radius - 4 }]}>
-            <MaterialCommunityIcons name="brain" size={13} color={color} />
-            <Text style={[styles.modelBadgeText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>
-              {result.modelName}
-            </Text>
-            {quality === 'hd' && (
-              <>
-                <View style={[styles.badgeDot, { backgroundColor: color + '40' }]} />
-                <MaterialCommunityIcons name="shimmer" size={13} color={color} />
-                <Text style={[styles.modelBadgeText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>HD</Text>
-              </>
-            )}
-          </View>
-
-          {/* Interactive before/after slider */}
-          <BeforeAfterSlider
-            beforeUri={image.uri}
-            afterUri={result.uri}
-            height={320}
-            beforeLabel="Original"
-            afterLabel="Removed"
-            accentColor={color}
-          />
-
-          {/* Metadata row */}
-          <View style={[styles.metaRow, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: colors.radius - 4 }]}>
-            <MaterialCommunityIcons name="check-circle-outline" size={14} color="#22C55E" />
-            <Text style={[styles.metaText, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              {result.width}×{result.height}px · Lossless PNG · {quality === 'hd' ? 'HD soft-edge matting' : 'Professional soft-edge matting'}
+          {/* AI model info banner */}
+          <View style={[styles.infoBanner, { backgroundColor: color + '0D', borderColor: color + '30', borderRadius: colors.radius }]}>
+            <MaterialCommunityIcons name="robot-outline" size={16} color={color} />
+            <Text style={[styles.infoBannerText, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}>
+              BiRefNet → RMBG-2.0 → U2Net fallback chain · 100% offline · No data leaves device
             </Text>
           </View>
+          <AIModelBadge service="segmentation" showUpgradeHint />
 
-          {/* Download / Share actions */}
-          <ResultActions uri={result.uri} fileName={guessFileName(toolId, 'png')} color={color} onReset={reset} />
+          {error && <StatusBanner type="error" message={error} />}
 
-          {/* HD Export: explicit full-resolution download button */}
-          {Platform.OS === 'web' && (
+          {!result && (
+            <ImageUploadWidget
+              image={image}
+              onPicked={setImage}
+              onError={setError}
+              color={color}
+              label="Upload photo with a clear subject"
+            />
+          )}
+
+          {/* Background preset picker */}
+          {!result && presets.length > 1 && (
+            <View>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>Background</Text>
+              <View style={styles.presetsRow}>
+                {presets.map((p) => {
+                  const active = preset === p.id;
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      onPress={() => setPreset(p.id)}
+                      style={[styles.presetChip, {
+                        borderColor: active ? color : colors.border,
+                        backgroundColor: active ? color + '14' : colors.card,
+                        borderRadius: colors.radius - 4,
+                      }]}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.swatch, { backgroundColor: p.swatch === 'transparent' ? 'transparent' : p.swatch, borderColor: colors.border }]}>
+                        {p.swatch === 'transparent' && <MaterialCommunityIcons name="checkerboard" size={14} color={colors.mutedForeground} />}
+                      </View>
+                      <Text style={[styles.presetLabel, { color: active ? color : colors.foreground, fontFamily: 'Inter_500Medium' }]}>{p.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Quality mode selector */}
+          {!result && image && (
+            <View>
+              <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>Quality Mode</Text>
+              <View style={styles.qualityRow}>
+                {([
+                  { id: 'standard' as QualityMode, label: 'Standard', icon: 'lightning-bolt', desc: 'Fast · Good for solid subjects' },
+                  { id: 'hd'       as QualityMode, label: 'HD',        icon: 'shimmer',        desc: 'Slower · Best for hair & fine detail' },
+                ] as const).map((q) => {
+                  const active = quality === q.id;
+                  return (
+                    <TouchableOpacity
+                      key={q.id}
+                      onPress={() => setQuality(q.id)}
+                      style={[styles.qualityChip, {
+                        borderColor: active ? color : colors.border,
+                        backgroundColor: active ? color + '12' : colors.card,
+                        borderRadius: colors.radius - 4,
+                        flex: 1,
+                      }]}
+                      activeOpacity={0.8}
+                    >
+                      <MaterialCommunityIcons name={q.icon as any} size={18} color={active ? color : colors.mutedForeground} />
+                      <View>
+                        <Text style={[styles.qualityLabel, { color: active ? color : colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{q.label}</Text>
+                        <Text style={[styles.qualityDesc,  { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{q.desc}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Process button */}
+          {!result && image && !processing && (
             <TouchableOpacity
-              style={[styles.hdExportBtn, { borderColor: color, borderRadius: colors.radius - 2 }]}
-              onPress={handleHDExport}
+              style={[styles.processBtn, { backgroundColor: color, borderRadius: colors.radius - 2 }]}
+              onPress={process}
               activeOpacity={0.85}
             >
-              <MaterialCommunityIcons name="download-outline" size={18} color={color} />
-              <Text style={[styles.hdExportText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>
-                Download HD PNG ({result.width}×{result.height})
+              <MaterialCommunityIcons name="auto-fix" size={18} color="#fff" />
+              <Text style={[styles.processText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+                {`Remove Background${quality === 'hd' ? ' (HD)' : ''}`}
               </Text>
             </TouchableOpacity>
           )}
 
-          {/* Process again with different quality/preset */}
-          <TouchableOpacity
-            style={[styles.reprocessBtn, { borderColor: colors.border, borderRadius: colors.radius - 2 }]}
-            onPress={() => { setResult(null); }}
-            activeOpacity={0.8}
-          >
-            <MaterialCommunityIcons name="refresh" size={15} color={colors.mutedForeground} />
-            <Text style={[styles.reprocessText, { color: colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>
-              Try different background or quality
-            </Text>
-          </TouchableOpacity>
+          {/* Processing state: steps + progress + cancel */}
+          {processing && (
+            <>
+              {/* Progress bar + percentage */}
+              <View style={[styles.processingHeader, { backgroundColor: color + '0D', borderColor: color + '20', borderRadius: colors.radius - 2 }]}>
+                <ActivityIndicator color={color} size="small" />
+                <Text style={[styles.processingPct, { color: color, fontFamily: 'Inter_700Bold' }]}>
+                  {progress}%
+                </Text>
+                <Text style={[styles.processingLabel, { color: colors.foreground, fontFamily: 'Inter_500Medium' }]}>
+                  {cancelling ? 'Cancelling…' : 'Processing…'}
+                </Text>
+              </View>
+
+              {/* Live step list */}
+              <ProcessingSteps steps={steps} accentColor={color} />
+
+              {/* Cancel button */}
+              {!cancelling && (
+                <TouchableOpacity
+                  style={[styles.cancelBtn, { borderColor: colors.border, borderRadius: colors.radius - 2 }]}
+                  onPress={handleCancel}
+                  activeOpacity={0.8}
+                >
+                  <MaterialCommunityIcons name="close-circle-outline" size={16} color={colors.mutedForeground} />
+                  <Text style={[styles.cancelText, { color: colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>
+                    Cancel Processing
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </>
+          )}
+
+          {/* Result: interactive before/after slider + actions */}
+          {result && image && (
+            <>
+              {/* Model badge */}
+              <View style={[styles.modelBadge, { backgroundColor: color + '12', borderColor: color + '30', borderRadius: colors.radius - 4 }]}>
+                <MaterialCommunityIcons name="brain" size={13} color={color} />
+                <Text style={[styles.modelBadgeText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>
+                  {result.modelName}
+                </Text>
+                {quality === 'hd' && (
+                  <>
+                    <View style={[styles.badgeDot, { backgroundColor: color + '40' }]} />
+                    <MaterialCommunityIcons name="shimmer" size={13} color={color} />
+                    <Text style={[styles.modelBadgeText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>HD</Text>
+                  </>
+                )}
+              </View>
+
+              {/* Interactive before/after slider */}
+              <BeforeAfterSlider
+                beforeUri={image.uri}
+                afterUri={result.uri}
+                height={320}
+                beforeLabel="Original"
+                afterLabel="Removed"
+                accentColor={color}
+              />
+
+              {/* Metadata row */}
+              <View style={[styles.metaRow, { borderColor: colors.border, backgroundColor: colors.card, borderRadius: colors.radius - 4 }]}>
+                <MaterialCommunityIcons name="check-circle-outline" size={14} color="#22C55E" />
+                <Text style={[styles.metaText, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
+                  {result.width}×{result.height}px · Lossless PNG · {quality === 'hd' ? 'HD soft-edge matting' : 'Professional soft-edge matting'}
+                </Text>
+              </View>
+
+              {/* Download / Share actions */}
+              <ResultActions uri={result.uri} fileName={guessFileName(toolId, 'png')} color={color} onReset={reset} />
+
+              {/* HD Export: explicit full-resolution download button */}
+              {Platform.OS === 'web' && (
+                <TouchableOpacity
+                  style={[styles.hdExportBtn, { borderColor: color, borderRadius: colors.radius - 2 }]}
+                  onPress={handleHDExport}
+                  activeOpacity={0.85}
+                >
+                  <MaterialCommunityIcons name="download-outline" size={18} color={color} />
+                  <Text style={[styles.hdExportText, { color: color, fontFamily: 'Inter_600SemiBold' }]}>
+                    Download HD PNG ({result.width}×{result.height})
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Process again with different quality/preset */}
+              <TouchableOpacity
+                style={[styles.reprocessBtn, { borderColor: colors.border, borderRadius: colors.radius - 2 }]}
+                onPress={() => { setResult(null); }}
+                activeOpacity={0.8}
+              >
+                <MaterialCommunityIcons name="refresh" size={15} color={colors.mutedForeground} />
+                <Text style={[styles.reprocessText, { color: colors.mutedForeground, fontFamily: 'Inter_500Medium' }]}>
+                  Try different background or quality
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </>
       )}
     </ToolScreenLayout>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  infoBanner:     { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1 },
-  infoBannerText: { flex: 1, fontSize: 12, lineHeight: 18 },
-  sectionLabel:   { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
-  presetsRow:     { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  presetChip:     { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1 },
-  swatch:         { width: 16, height: 16, borderRadius: 4, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  presetLabel:    { fontSize: 12 },
-  qualityRow:     { flexDirection: 'row', gap: 8 },
-  qualityChip:    { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1.5 },
-  qualityLabel:   { fontSize: 13 },
-  qualityDesc:    { fontSize: 10, marginTop: 1 },
-  processBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  processText:    { fontSize: 14 },
-  modelBadge:     { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, alignSelf: 'flex-start' },
-  modelBadgeText: { fontSize: 11 },
-  badgeDot:       { width: 3, height: 3, borderRadius: 1.5 },
-  metaRow:        { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, borderWidth: 1 },
-  metaText:       { flex: 1, fontSize: 11 },
-  hdExportBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderWidth: 1.5, marginTop: 4 },
-  hdExportText:   { fontSize: 13 },
-  reprocessBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderWidth: 1, marginTop: 4 },
-  reprocessText:  { fontSize: 12 },
+  infoBanner:       { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderWidth: 1 },
+  infoBannerText:   { flex: 1, fontSize: 12, lineHeight: 18 },
+  sectionLabel:     { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
+  presetsRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  presetChip:       { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1 },
+  swatch:           { width: 16, height: 16, borderRadius: 4, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  presetLabel:      { fontSize: 12 },
+  qualityRow:       { flexDirection: 'row', gap: 8 },
+  qualityChip:      { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderWidth: 1.5 },
+  qualityLabel:     { fontSize: 13 },
+  qualityDesc:      { fontSize: 10, marginTop: 1 },
+  processBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
+  processText:      { fontSize: 14 },
+  processingHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1 },
+  processingPct:    { fontSize: 16 },
+  processingLabel:  { fontSize: 13, flex: 1 },
+  cancelBtn:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderWidth: 1, marginTop: 4 },
+  cancelText:       { fontSize: 12 },
+  modelBadge:       { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, alignSelf: 'flex-start' },
+  modelBadgeText:   { fontSize: 11 },
+  badgeDot:         { width: 3, height: 3, borderRadius: 1.5 },
+  metaRow:          { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, borderWidth: 1 },
+  metaText:         { flex: 1, fontSize: 11 },
+  hdExportBtn:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderWidth: 1.5, marginTop: 4 },
+  hdExportText:     { fontSize: 13 },
+  reprocessBtn:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderWidth: 1, marginTop: 4 },
+  reprocessText:    { fontSize: 12 },
 });

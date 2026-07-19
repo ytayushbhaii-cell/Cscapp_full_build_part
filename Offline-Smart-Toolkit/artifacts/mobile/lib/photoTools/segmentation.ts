@@ -6,17 +6,21 @@
  *  • Professional soft-alpha matting — smooth edges, no hard cutouts
  *  • Hole fill + SAM2 trimap + quad-pass guided filter + hair refinement
  *  • Color decontamination — no white/blue halo
+ *  • Low-light / blurry image auto-enhancement before segmentation
+ *  • Cancel support via AbortSignal
  *
- * 100% offline after first model load. No photo or pixel data ever leaves device.
+ * 100% offline after first model download. No photo or pixel data ever leaves device.
  */
 export { warmUpSegmentation as warmUpSegmentationModel } from '@/lib/ai/services/SegmentationService';
 export type { QualityMode } from '@/lib/ai/services/SegmentationService';
+export type { SegmentationStepCallback } from '@/lib/ai/services/SegmentationService';
 
 import {
   segmentSubject,
   removeBackgroundPro,
   blurBackgroundPro,
   type QualityMode,
+  type SegmentationStepCallback,
 } from '@/lib/ai/services/SegmentationService';
 import { blurPixels } from './pixelOps';
 import type { BackgroundPreset } from './types';
@@ -56,7 +60,14 @@ const BG_COLORS: Record<string, [number, number, number]> = {
 
 /**
  * Removes / replaces background with professional soft-alpha matting.
- * Same call signature as before — all callers work without any changes.
+ *
+ * @param uri          - input image URI
+ * @param preset       - background preset
+ * @param customColor  - custom RGB color for 'custom' preset
+ * @param onProgress   - 0–100 progress callback
+ * @param quality      - 'standard' (default) or 'hd' (extra hair refinement)
+ * @param steps        - optional per-step status callbacks for detailed UI
+ * @param signal       - optional AbortSignal for cancellation
  */
 export async function removeBackground(
   uri: string,
@@ -64,6 +75,8 @@ export async function removeBackground(
   customColor?: [number, number, number],
   onProgress?: (pct: number) => void,
   quality: QualityMode = 'standard',
+  steps?: SegmentationStepCallback,
+  signal?: AbortSignal,
 ): Promise<{ uri: string; width: number; height: number; modelName?: string }> {
   let bgColor: [number, number, number] | null = null;
   if (preset === 'transparent') {
@@ -73,7 +86,7 @@ export async function removeBackground(
   } else {
     bgColor = BG_COLORS[preset as string] ?? [255, 255, 255];
   }
-  return removeBackgroundPro(uri, bgColor, onProgress, quality);
+  return removeBackgroundPro(uri, bgColor, onProgress, quality, steps, signal);
 }
 
 /**
@@ -82,6 +95,7 @@ export async function removeBackground(
 export async function blurBackground(
   uri: string,
   blurRadius: number,
+  signal?: AbortSignal,
 ): Promise<{ uri: string; width: number; height: number }> {
-  return blurBackgroundPro(uri, blurRadius, blurPixels);
+  return blurBackgroundPro(uri, blurRadius, blurPixels, signal);
 }
