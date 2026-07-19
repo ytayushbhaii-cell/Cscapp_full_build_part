@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
@@ -15,8 +15,13 @@ import { ThemeProvider, useTheme } from '@/context/ThemeContext';
 import { DrawerProvider } from '@/context/DrawerContext';
 import { AppProvider } from '@/context/AppContext';
 import { SettingsProvider } from '@/context/SettingsContext';
+import SplashScreenView from '@/components/SplashScreenView';
 
-SplashScreen.preventAutoHideAsync();
+// Hide the native expo splash immediately — our custom React splash replaces it.
+SplashScreen.preventAutoHideAsync().then(() => SplashScreen.hideAsync()).catch(() => {});
+
+// Minimum ms to keep custom splash visible (fonts often load instantly on web).
+const MIN_SPLASH_MS = 2600;
 
 function RootLayoutInner() {
   const { isDark } = useTheme();
@@ -37,14 +42,17 @@ export default function RootLayout() {
     Inter_700Bold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded]);
+  const [minTimeDone, setMinTimeDone] = useState(false);
 
-  if (!fontsLoaded) {
-    return null;
+  useEffect(() => {
+    const t = setTimeout(() => setMinTimeDone(true), MIN_SPLASH_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  const ready = fontsLoaded && minTimeDone;
+
+  if (!ready) {
+    return <SplashScreenView />;
   }
 
   return (
