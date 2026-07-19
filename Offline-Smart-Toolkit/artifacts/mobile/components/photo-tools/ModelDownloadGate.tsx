@@ -50,21 +50,30 @@ interface ModelSpec {
   downloadUrl: string;
 }
 
-// These match onnxBackend.ts MODEL_CONFIGS. The primary model is tried first;
-// the fallback is U2Net which is much smaller and always downloaded together.
+// These match onnxBackend.ts MODEL_CONFIGS and BEN2Backend.ts.
+// The primary model is tried first; fallback models are downloaded alongside.
 const MODEL_SPECS: Record<string, ModelSpec> = {
   birefnet: {
     id:          'birefnet',
     name:        'BiRefNet (Primary)',
     description: 'Highest quality hair & edge detail',
+    // Actual quantized model file size on disk (birefnet-q.onnx).
+    // This must match the real file — ModelDownloadService enforces ±5% integrity check.
     sizeBytes:   44 * 1024 * 1024,
     downloadUrl: '/models/birefnet-q.onnx',
+  },
+  ben2: {
+    id:          'ben2',
+    name:        'BEN2 (Hair Refinement)',
+    description: 'Secondary refinement for hair, fur & complex edges',
+    sizeBytes:   180 * 1024 * 1024,
+    downloadUrl: '/models/ben2.onnx',
   },
   rmbg2: {
     id:          'rmbg2',
     name:        'RMBG-2.0 (Fallback)',
-    description: 'High-quality InSPyReNet model',
-    sizeBytes:   80 * 1024 * 1024,
+    description: 'High-quality fallback & low-memory mode',
+    sizeBytes:   90 * 1024 * 1024,
     downloadUrl: '/models/rmbg-2.0.onnx',
   },
   u2net: {

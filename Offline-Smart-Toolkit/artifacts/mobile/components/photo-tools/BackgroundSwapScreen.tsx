@@ -64,7 +64,9 @@ interface BackgroundSwapScreenProps {
 
 const STANDARD_STEPS = [
   { id: 'decode',  label: 'Loading image at original resolution…' },
+  { id: 'analyze', label: 'Analyzing subject & routing model…' },
   { id: 'detect',  label: 'Detecting Subject…' },
+  { id: 'ben2',    label: 'BEN2 Hair & Edge Refinement…' },
   { id: 'refine',  label: 'Refining Hair & Fine Details…' },
   { id: 'edges',   label: 'Enhancing Edges…' },
   { id: 'encode',  label: 'Generating Transparent PNG…' },
@@ -72,15 +74,22 @@ const STANDARD_STEPS = [
 
 const HD_STEPS = [
   { id: 'decode',  label: 'Loading image at original resolution…' },
-  { id: 'detect',  label: 'Detecting Subject (HD mode)…' },
-  { id: 'refine',  label: 'Refining Hair — sub-pixel precision…' },
+  { id: 'analyze', label: 'Analyzing subject & selecting HD pipeline…' },
+  { id: 'detect',  label: 'Running BiRefNet (HD mode)…' },
+  { id: 'ben2',    label: 'BEN2 Hair Refinement — sub-pixel precision…' },
+  { id: 'refine',  label: 'Guided filter + Hair strands…' },
   { id: 'edges',   label: 'Enhancing Edges & Removing Halo…' },
   { id: 'encode',  label: 'Generating HD Transparent PNG…' },
 ];
 
 // ─── Required models for the download gate ────────────────────────────────────
-// We require at least one primary (birefnet) and one fallback (u2net).
-// rmbg2 and isnet are optional; the pipeline handles missing models gracefully.
+// birefnet: primary high-quality model
+// u2net:    compact fallback — always downloaded as a safety net
+//
+// ben2 and rmbg2 are OPTIONAL — the pipeline handles them gracefully when absent:
+//  • BEN2Backend falls back to CPU refinement if ben2.onnx is not cached
+//  • RMBG-2.0 is skipped silently if not cached (u2net takes its place)
+// Do NOT add ben2 here until ben2.onnx is actually hosted and downloadable.
 const REQUIRED_MODEL_IDS = ['birefnet', 'u2net'];
 
 // ─── Component ────────────────────────────────────────────────────────────────

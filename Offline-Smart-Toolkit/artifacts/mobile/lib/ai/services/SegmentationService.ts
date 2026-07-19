@@ -1,22 +1,30 @@
 /**
- * Segmentation Service — multi-model background removal.
+ * Segmentation Service — multi-model background removal with intelligent routing.
  *
  * ─── Quality modes ───────────────────────────────────────────────────────────
- *  standard  — model at ≤1024px, quad-pass guided filter
- *  hd        — model at ≤1024px, quad-pass + hair refinement pass + stronger decontamination
+ *  standard  — BiRefNet (or routed model) at ≤1024px, quad-pass guided filter
+ *  hd        — BiRefNet + BEN2 refinement + hair pass + stronger decontamination
  *
  * ─── Web pipeline ────────────────────────────────────────────────────────────
- *  1. Canvas API decode → RGBA at original resolution (zero quality loss)
- *  2. Low-light auto-enhancement for dark/blurry images (inference copy only)
- *  3. Resize to ≤1024px for model inference
- *  4. Multi-model ONNX: BiRefNet → RMBG-2.0 → U2Net → IS-Net (priority order)
- *  5. Bilinear upsample alpha → ORIGINAL resolution
- *  6. refineAlpha() post-processing at original resolution
+ *  1. EXIF orientation detection & correction
+ *  2. Canvas API decode → RGBA at original resolution (zero quality loss)
+ *  3. Image analysis: blur, brightness, contrast, subject type, edge density
+ *  4. Intelligent model routing: BiRefNet / BiRefNet+BEN2 / RMBG-2.0
+ *  5. Noise reduction & auto-enhancement on inference copy only
+ *  6. Resize to ≤1024px for model inference
+ *  7. Multi-model ONNX: BiRefNet → RMBG-2.0 → U2Net → IS-Net (priority order)
+ *  8. Bilinear upsample alpha → ORIGINAL resolution
+ *  9. BEN2 refinement pass (when routing decision = useBEN2)
+ * 10. refineAlpha() post-processing at original resolution
  *     (hole fill → SAM2 trimap → guided filter → hair pass → halo removal → edge polish)
- *  7. Composite at original resolution → PNG (every pixel preserved)
+ * 11. Composite at original resolution → PNG (every pixel preserved)
  *
  * ─── Native pipeline ─────────────────────────────────────────────────────────
  *  BodyPix MobileNetV1 + same refineAlpha() pipeline.
+ *
+ * ─── Resolution guarantee ────────────────────────────────────────────────────
+ *  Internal resizing is for inference only. The final PNG is ALWAYS at the
+ *  original image resolution. 720p/1080p/2K/4K images are all supported.
  *
  * ─── Cancel support ──────────────────────────────────────────────────────────
  *  Pass an AbortSignal to removeBackgroundPro / blurBackgroundPro.
@@ -40,10 +48,20 @@ import {
   warmUpOnnxModels,
   resizeRGBABilinear,
   lastOrtError,
-  enhanceForSegmentation,
 } from './onnxBackend';
 import { modelRegistry } from '../ModelRegistry';
 import type { SegmentationResult } from '../types';
+
+// ── New services ──────────────────────────────────────────────────────────────
+import { detectDeviceCapabilities } from './DeviceCapability';
+import {
+  analyzeImage,
+  applySegmentationEnhancements,
+  correctOrientation,
+  type ImageAnalysis,
+} from './ImagePreprocessor';
+import { routeImage, type RoutingDecision } from './ImageRouter';
+import { refineMaskWithBEN2, isBEN2Available, warmUpBEN2 } from './BEN2Backend';
 
 export type QualityMode = 'standard' | 'hd';
 
@@ -88,6 +106,7 @@ async function getNativeBodyPix() {
 
 export function warmUpSegmentation(): void {
   warmUpOnnxModels();
+  warmUpBEN2();
   if (Platform.OS !== 'web') {
     getNativeBodyPix().catch(() => {});
   }
@@ -222,7 +241,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string, signal?: Abort
   ]);
 }
 
-const TIMEOUT_MS = 120_000;
+const TIMEOUT_MS = 180_000; // extended for BEN2 refinement pass
 
 // ─── Progress step callbacks ──────────────────────────────────────────────────
 
@@ -236,17 +255,49 @@ export interface SegmentationStepCallback {
 
 // ─── ONNX alpha extraction ────────────────────────────────────────────────────
 
+/**
+ * Builds the model execution order from a routing decision so that
+ * low-memory and content-aware routing is actually enforced at inference time.
+ *
+ * Example: routing says primaryModel=rmbg2, fallbackModel=u2net
+ *   → order = ['rmbg2', 'u2net', 'birefnet', 'isnet']
+ * Low-memory devices never hit BiRefNet first.
+ */
+import type { OnnxModelId } from './onnxBackend';
+
+function buildPreferredOrder(decision: RoutingDecision): OnnxModelId[] {
+  const full: OnnxModelId[] = ['birefnet', 'rmbg2', 'u2net', 'isnet'];
+  const head: OnnxModelId[] = [decision.primaryModel, decision.fallbackModel].filter(
+    (id, i, arr) => arr.indexOf(id) === i, // deduplicate
+  ) as OnnxModelId[];
+  // Append remaining models not already in head (preserves full fallback coverage)
+  const tail = full.filter(id => !head.includes(id));
+  return [...head, ...tail];
+}
+
 async function onnxAlpha(
   decoded: DecodeResult,
+  analysis: ImageAnalysis,
+  decision: RoutingDecision,
   signal?: AbortSignal,
 ): Promise<{ alpha: Float32Array; modelName: string } | null> {
+  // Apply pre-processing enhancements to model pixels only
+  const enhancedModelPixels = applySegmentationEnhancements(
+    decoded.modelPixels, decoded.modelW, decoded.modelH, analysis,
+  );
+
+  // Build ordered model list from routing decision and pass it through
+  // so low-memory / content-aware routing is enforced at inference time
+  const preferredOrder = buildPreferredOrder(decision);
+
   const result = await runSegmentationWithFallback(
-    decoded.modelPixels,
+    enhancedModelPixels,
     decoded.modelW,
     decoded.modelH,
     decoded.origW,
     decoded.origH,
     signal,
+    preferredOrder,
   );
   if (!result) return null;
   return { alpha: result.alpha, modelName: result.modelName };
@@ -292,7 +343,19 @@ export async function segmentSubject(uri: string, signal?: AbortSignal): Promise
     let backend: SegmentationResult['backend'];
 
     if (Platform.OS === 'web') {
-      const result = await onnxAlpha(decoded, signal);
+      // Analyze the image and compute routing decision
+      const [analysis, capability, ben2Ready] = await Promise.all([
+        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
+        detectDeviceCapabilities(),
+        isBEN2Available(),
+      ]);
+      checkAbort(signal);
+
+      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+        modelRegistry.get('birefnet')?.status === 'ai-loading';
+      const decision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
+
+      const result = await onnxAlpha(decoded, analysis, decision, signal);
       checkAbort(signal);
       if (!result) {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
@@ -301,7 +364,7 @@ export async function segmentSubject(uri: string, signal?: AbortSignal): Promise
         );
       }
       alpha   = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
-      backend = 'birefnet';
+      backend = decision.primaryModel as SegmentationResult['backend'];
     } else {
       alpha   = await bodyPixAlpha(decoded);
       backend = 'bodypix';
@@ -329,10 +392,20 @@ export async function segmentSubject(uri: string, signal?: AbortSignal): Promise
 /**
  * Removes the background and returns a transparent (or solid-colour) PNG URI.
  *
+ * ─── Full pipeline ────────────────────────────────────────────────────────────
+ *  1. EXIF orientation correction (auto, transparent to caller)
+ *  2. Image decode at original resolution
+ *  3. Image analysis + intelligent model routing
+ *  4. Noise reduction + auto-enhancement on inference copy
+ *  5. Multi-model ONNX inference (BiRefNet primary)
+ *  6. BEN2 refinement (when routing says useBEN2 = true)
+ *  7. Professional alpha matting (hole fill, guided filter, hair pass, halo removal)
+ *  8. Composite at original resolution → lossless PNG
+ *
  * @param uri         - input image URI
  * @param bgColor     - null = transparent, [r,g,b] = solid colour
  * @param onProgress  - 0–100 progress callback
- * @param quality     - 'standard' (default) or 'hd' (extra hair refinement pass)
+ * @param quality     - 'standard' (default) or 'hd' (extra BEN2 + hair refinement)
  * @param steps       - optional per-step status callbacks for detailed UI
  * @param signal      - optional AbortSignal for cancellation
  */
@@ -349,24 +422,71 @@ export async function removeBackgroundPro(
   const hd     = quality === 'hd';
 
   const inner = async () => {
-    // ── Stage: Decode ──────────────────────────────────────────────────────
+    // ── Stage 0: EXIF orientation correction ──────────────────────────────
     checkAbort(signal);
+    let effectiveUri = uri;
+    if (Platform.OS === 'web') {
+      // Read orientation; correct if needed. Errors are silently ignored.
+      try {
+        const { readExifOrientation, correctOrientation: fixOrientation } =
+          await import('./ImagePreprocessor');
+        const orientation = await readExifOrientation(uri);
+        if (orientation > 1) {
+          effectiveUri = await fixOrientation(uri, orientation);
+          console.info(`[Segmentation] EXIF orientation ${orientation} corrected`);
+        }
+      } catch { /* skip on error */ }
+    }
+    checkAbort(signal);
+
+    // ── Stage 1: Decode ────────────────────────────────────────────────────
     report(3);
     step('decode', 'running');
-    const decoded = await decodeImage(uri);
+    const decoded = await decodeImage(effectiveUri);
     checkAbort(signal);
     step('decode', 'done');
-    report(12);
+    report(10);
 
     let alpha: Float32Array;
     let modelName = 'BodyPix';
+    let routingDecision: RoutingDecision | null = null;
 
     if (Platform.OS === 'web') {
-      // ── Stage: Detect Subject ─────────────────────────────────────────────
-      report(18);
-      step('detect', 'running');
-      const result = await onnxAlpha(decoded, signal);
+
+      // ── Stage 2: Analyze & route ─────────────────────────────────────────
+      step('analyze', 'running');
+      report(13);
+
+      const [analysis, capability, ben2Ready] = await Promise.all([
+        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, effectiveUri),
+        detectDeviceCapabilities(),
+        isBEN2Available(),
+      ]);
+
+      // Check if BiRefNet is available for routing decision
+      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+        modelRegistry.get('birefnet')?.status === 'ai-loading';
+
+      routingDecision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
+
+      console.info(
+        `[Segmentation] Route: ${routingDecision.reason} | ` +
+        `BEN2=${routingDecision.useBEN2} | hd=${hd}`,
+      );
+
+      step('analyze', 'done');
+      report(17);
       checkAbort(signal);
+
+      // ── Stage 3: Detect Subject (ONNX inference) ─────────────────────────
+      step('detect', 'running');
+      report(20);
+
+      // Route through onnxAlpha so the routing decision's preferred model order
+      // is actually enforced at inference time (low-RAM → RMBG-2.0 first, etc.)
+      const result = await onnxAlpha(decoded, analysis, routingDecision, signal);
+      checkAbort(signal);
+
       if (!result) {
         step('detect', 'error');
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
@@ -375,17 +495,44 @@ export async function removeBackgroundPro(
         );
       }
       step('detect', 'done');
-      report(58);
+      report(55);
+      modelName = result.modelName;
 
-      // ── Stage: Refine Hair ────────────────────────────────────────────────
+      // ── Stage 4: BEN2 Refinement (when routing says useBEN2) ─────────────
+      let coarseAlpha = result.alpha;
+      const shouldRunBEN2 = routingDecision.useBEN2 || (hd && ben2Ready);
+
+      if (shouldRunBEN2) {
+        step('ben2', 'running');
+        report(60);
+        checkAbort(signal);
+
+        coarseAlpha = await refineMaskWithBEN2(
+          decoded.modelPixels,
+          decoded.origPixels,
+          result.alpha,
+          decoded.modelW,
+          decoded.modelH,
+          decoded.origW,
+          decoded.origH,
+          signal,
+        );
+        checkAbort(signal);
+        step('ben2', 'done');
+        report(70);
+        modelName = `${result.modelName} + BEN2`;
+      }
+
+      // ── Stage 5: Refine Alpha (guided filter + hair pass) ────────────────
       step('refine', 'running');
-      report(62);
+      report(73);
       checkAbort(signal);
-      alpha     = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH, { hd });
+
+      alpha = refineAlpha(coarseAlpha, decoded.origPixels, decoded.origW, decoded.origH, { hd });
       checkAbort(signal);
       step('refine', 'done');
-      modelName = result.modelName;
-      report(78);
+      report(84);
+
     } else {
       // Native: BodyPix
       report(18);
@@ -393,26 +540,27 @@ export async function removeBackgroundPro(
       alpha     = await bodyPixAlpha(decoded, hd);
       checkAbort(signal);
       step('detect', 'done');
+      step('analyze', 'done');
+      step('ben2', 'done');
       step('refine', 'done');
       modelName = 'BodyPix';
-      report(75);
+      report(80);
     }
 
-    // ── Stage: Enhance Edges ──────────────────────────────────────────────
+    // ── Stage 6: Enhance Edges + Composite ───────────────────────────────
     checkAbort(signal);
     step('edges', 'running');
-    report(82);
-    // Edge work is already done inside refineAlpha; this stage represents compositing
+    report(87);
     const rgba = compositeWithSoftAlpha(
       decoded.origPixels, alpha, decoded.origW, decoded.origH, bgColor,
     );
     checkAbort(signal);
     step('edges', 'done');
-    report(90);
-
-    // ── Stage: Generate PNG ───────────────────────────────────────────────
-    step('encode', 'running');
     report(92);
+
+    // ── Stage 7: Generate PNG ─────────────────────────────────────────────
+    step('encode', 'running');
+    report(94);
     const outUri = await writePngFromRGBA(rgba, decoded.origW, decoded.origH);
     checkAbort(signal);
     step('encode', 'done');
@@ -441,7 +589,17 @@ export async function blurBackgroundPro(
     let subjectWeight: Float32Array;
 
     if (Platform.OS === 'web') {
-      const result = await onnxAlpha(decoded, signal);
+      // Quick analysis for blur — no BEN2 needed, but routing still enforced
+      // so low-memory devices use RMBG-2.0 first instead of BiRefNet
+      const [analysis, capability] = await Promise.all([
+        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
+        detectDeviceCapabilities(),
+      ]);
+      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+        modelRegistry.get('birefnet')?.status === 'ai-loading';
+      const decision = routeImage(analysis, capability, false, birefnetAvailable);
+
+      const result = await onnxAlpha(decoded, analysis, decision, signal);
       checkAbort(signal);
       if (!result) {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';

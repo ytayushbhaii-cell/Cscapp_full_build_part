@@ -16,11 +16,12 @@ class AIModelRegistry {
 
   private registerDefaults() {
     // ── Segmentation ──────────────────────────────────────────────────────────
-    this.register({ id: 'birefnet',  name: 'BiRefNet · ONNX',       backend: 'birefnet', status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
-    this.register({ id: 'rmbg2',     name: 'RMBG-2.0 · ONNX',       backend: 'rmbg2',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 80  });
-    this.register({ id: 'u2net',     name: 'U2Net-Portrait · ONNX',  backend: 'u2net',    status: 'ai-unavailable', maxRes: 320,  sizeMB: 4.4 });
-    this.register({ id: 'isnet',     name: 'IS-Net · ONNX',          backend: 'isnet',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 176 });
-    this.register({ id: 'bodypix',   name: 'BodyPix MobileNetV1',    backend: 'bodypix',  status: 'offline-cpu',    maxRes: 0,   sizeMB: 4   });
+    this.register({ id: 'birefnet',  name: 'BiRefNet · ONNX',        backend: 'birefnet', status: 'ai-unavailable', maxRes: 1024, sizeMB: 44  });
+    this.register({ id: 'ben2',      name: 'BEN2 · ONNX',            backend: 'ben2',     status: 'ai-unavailable', maxRes: 1024, sizeMB: 180 });
+    this.register({ id: 'rmbg2',     name: 'RMBG-2.0 · ONNX',        backend: 'rmbg2',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 90  });
+    this.register({ id: 'u2net',     name: 'U2Net-Portrait · ONNX',   backend: 'u2net',    status: 'ai-unavailable', maxRes: 320,  sizeMB: 4.4 });
+    this.register({ id: 'isnet',     name: 'IS-Net · ONNX',           backend: 'isnet',    status: 'ai-unavailable', maxRes: 1024, sizeMB: 176 });
+    this.register({ id: 'bodypix',   name: 'BodyPix MobileNetV1',     backend: 'bodypix',  status: 'offline-cpu',    maxRes: 0,   sizeMB: 4   });
 
     // ── Face detection / alignment ────────────────────────────────────────────
     this.register({ id: 'bodypix-face', name: 'BodyPix Face Centroid', backend: 'bodypix-centroid', status: 'offline-cpu',    maxRes: 0,   sizeMB: 0   });
@@ -84,6 +85,7 @@ class AIModelRegistry {
       'birefnet': 'BiRefNet · ONNX',
       'rmbg2':    'RMBG-2.0 · ONNX',
       'isnet':    'IS-Net · ONNX',
+      'ben2':     'BiRefNet + BEN2 · ONNX',
     };
     return labels[backend] ?? backend;
   }

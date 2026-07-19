@@ -2,10 +2,13 @@
  * ONNX Backend — Multi-model segmentation with priority fallback.
  *
  * ─── Model Priority (highest → lowest quality) ───────────────────────────────
- *  1. BiRefNet   (birefnet-q.onnx, 44 MB)  — best hair/edge quality
- *  2. RMBG-2.0   (rmbg-2.0.onnx)           — high-quality InSPyReNet
- *  3. U2Net-P    (u2netp.onnx, 4.4 MB)     — fast general-purpose fallback
+ *  1. BiRefNet   (birefnet-q.onnx, ~120 MB) — best hair/edge quality (primary)
+ *  2. RMBG-2.0   (rmbg-2.0.onnx,  ~90 MB)  — high-quality InSPyReNet (fallback)
+ *  3. U2Net-P    (u2netp.onnx,    4.4 MB)  — fast compact fallback
  *  4. IS-Net     (isnet-general.onnx)       — complex-scene accuracy
+ *
+ *  BEN2 is handled separately by BEN2Backend.ts as a refinement pass on top
+ *  of BiRefNet output — not part of this fallback chain.
  *
  * ─── Model loading ────────────────────────────────────────────────────────────
  *  1. Check IndexedDB cache (ModelDownloadService.web.ts)
@@ -491,6 +494,16 @@ async function runModel(
 
 /**
  * Runs segmentation using the best available model, with automatic fallback.
+ *
+ * @param pixels        RGBA pixels at model resolution
+ * @param w / h         model dimensions
+ * @param origW / origH original image dimensions (for upsampling)
+ * @param signal        optional AbortSignal
+ * @param preferredOrder optional model order override from ImageRouter.
+ *   When provided, this order is used instead of the default PRIORITY_ORDER.
+ *   This allows low-memory routing (RMBG-2.0 first) and content-aware routing
+ *   to be actually enforced at inference time — not just logged.
+ *
  * Returns null only if every model in the chain failed.
  */
 export async function runSegmentationWithFallback(
@@ -500,11 +513,18 @@ export async function runSegmentationWithFallback(
   origW: number,
   origH: number,
   signal?: AbortSignal,
+  preferredOrder?: OnnxModelId[],
 ): Promise<OnnxResult | null> {
   if (signal?.aborted) return null;
 
-  // If we already found a working model, use it directly
-  if (_activeModelId) {
+  // Use router-supplied order if provided; otherwise fall back to static priority
+  const order = preferredOrder && preferredOrder.length > 0 ? preferredOrder : PRIORITY_ORDER;
+
+  // If we already found a working model AND it is at the head of the preferred order,
+  // keep using it to amortise session load cost.
+  // If the preferred order changed (e.g. routing switched from BiRefNet to RMBG-2.0),
+  // respect the new order and let the loop below pick the right model.
+  if (_activeModelId && order[0] === _activeModelId) {
     const session = await getOrLoadSession(_activeModelId);
     if (session) {
       try {
@@ -521,9 +541,10 @@ export async function runSegmentationWithFallback(
     }
   }
 
-  // Try each model in priority order
-  for (const id of PRIORITY_ORDER) {
+  // Try each model in the (possibly router-overridden) order
+  for (const id of order) {
     if (signal?.aborted) return null;
+    if (!MODEL_CONFIGS[id]) continue; // guard against unknown ids
     const session = await getOrLoadSession(id);
     if (!session) continue;
     try {
@@ -531,7 +552,7 @@ export async function runSegmentationWithFallback(
       if (signal?.aborted) return null;
       _activeModelId = id;
       modelRegistry.setStatus(id, 'ai-cached');
-      console.info(`[ONNX] ✅ Using ${MODEL_CONFIGS[id].name} (${id})`);
+      console.info(`[ONNX] ✅ Using ${MODEL_CONFIGS[id].name} (${id}) [order: ${order.join('→')}]`);
       return result;
     } catch (e: any) {
       if (signal?.aborted || e?.name === 'AbortError') return null;

@@ -10,3 +10,4 @@
 - [Platform shadow cross-compat](platform-shadow.md) — shadow* props deprecated on web; wrap all shadow* in Platform.select({web:{boxShadow:...}as any, default:{shadowColor:...}}) inside StyleSheet.create.
 - [ortLoader platform extension TS stub](ortloader-ts-stub.md) — ortLoader.web.ts / .native.ts exist but tsc can't resolve platform extensions; create ortLoader.ts base stub with same signature.
 - [expo-file-system dynamic import typing](expo-fs-dynamic-import.md) — dynamic `await import('expo-file-system')` returns module namespace; cast as any to access cacheDirectory/writeAsStringAsync.
+- [BEN2 bg-removal architecture](ben2-bg-removal-arch.md) — Four-service AI upgrade: DeviceCapability + ImagePreprocessor + ImageRouter + BEN2Backend; BEN2 model files still needed at public/models/ben2.onnx.
