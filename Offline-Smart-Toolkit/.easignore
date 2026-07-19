@@ -1,0 +1,26 @@
+# Exclude files not needed for Android/iOS builds to reduce upload size
+
+# Workspace-level node_modules (EAS installs deps during build)
+node_modules/
+
+# Web-only public assets (ONNX models, wasm runtimes - native uses TF.js/BodyPix)
+artifacts/mobile/public/
+
+# Static web build output
+artifacts/mobile/dist/
+
+# Dev/test
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+
+# Editor / IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Git
+.git/
+
+# Mockup sandbox (web-only dev tool)
+artifacts/mockup-sandbox/

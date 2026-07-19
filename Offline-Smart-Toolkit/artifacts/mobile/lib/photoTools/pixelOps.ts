@@ -15,17 +15,32 @@
  *  • Better sharpen    — multi-scale unsharp mask (edge-aware)
  *  • Better blur       — 3-pass separable box (Gaussian approximation)
  */
-import '@tensorflow/tfjs-backend-cpu';
-import * as tf from '@tensorflow/tfjs';
-// eslint-disable-next-line import/no-internal-modules
-import { decodeJpeg } from '@tensorflow/tfjs-react-native/dist/decode_image';
 import { convertFormat, SaveFormat } from './imageOps';
 import { writePngFromRGBA } from './exportUtils';
+
+// ─── Lazy TF.js loader (avoids top-level static imports that crash on launch) ─
+// @tensorflow/tfjs-react-native requires expo-gl which is incompatible with
+// React Native new architecture. Dynamic imports prevent a crash at module load
+// time if TF.js fails to initialise — the rest of pixelOps is pure JS.
+let _tf: typeof import('@tensorflow/tfjs') | null = null;
+let _decodeJpeg: ((buf: Uint8Array) => any) | null = null;
 
 let backendReady: Promise<void> | null = null;
 async function ensureBackend(): Promise<void> {
   if (!backendReady) {
-    backendReady = tf.ready().then(async () => { try { await tf.setBackend('cpu'); } catch { /* ignore */ } });
+    backendReady = (async () => {
+      try {
+        await import('@tensorflow/tfjs-backend-cpu');
+        _tf = await import('@tensorflow/tfjs');
+        // eslint-disable-next-line import/no-internal-modules
+        const rn = await import('@tensorflow/tfjs-react-native/dist/decode_image');
+        _decodeJpeg = rn.decodeJpeg;
+        await _tf.ready();
+        try { await _tf.setBackend('cpu'); } catch { /* ignore */ }
+      } catch {
+        // TF.js unavailable — decodeToRGBA will throw; callers must handle this
+      }
+    })();
   }
   return backendReady;
 }
@@ -43,12 +58,15 @@ export interface RGBAImage {
 
 export async function decodeToRGBA(uri: string): Promise<RGBAImage> {
   await ensureBackend();
+  if (!_tf || !_decodeJpeg) throw new Error('TF.js unavailable on this platform');
+  const tf = _tf;
+  const decodeJpeg = _decodeJpeg;
   const jpeg = await convertFormat(uri, SaveFormat.JPEG, 0.97);
   const buf = await (await fetch(jpeg.uri)).arrayBuffer();
-  const tensor = decodeJpeg(new Uint8Array(buf)) as tf.Tensor3D;
+  const tensor = decodeJpeg(new Uint8Array(buf)) as import('@tensorflow/tfjs').Tensor3D;
   try {
     const [height, width] = tensor.shape;
-    const rgb = await tf.browser.toPixels(tensor.div(255) as tf.Tensor3D);
+    const rgb = await tf.browser.toPixels(tensor.div(255) as import('@tensorflow/tfjs').Tensor3D);
     return { width, height, pixels: new Uint8ClampedArray(rgb.buffer) };
   } finally {
     tensor.dispose();
