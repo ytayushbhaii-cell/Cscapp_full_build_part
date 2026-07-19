@@ -1,0 +1,24 @@
+# Reduce EAS Build upload size by excluding files not needed for Android/iOS builds
+
+# Web-only distribution files
+dist/
+public/ort-wasm/
+public/ort.min.js
+
+# ONNX models are web-only (native uses TF.js/BodyPix instead)
+public/models/
+
+# Dev / test files
+__tests__/
+*.test.ts
+*.test.tsx
+
+# Node modules (EAS installs these during build)
+node_modules/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Git
+.git/
