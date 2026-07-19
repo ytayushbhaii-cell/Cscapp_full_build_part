@@ -219,6 +219,24 @@ export default function CompanyStampScreen() {
     }
   };
 
+  const handleSaveToGallery = async () => {
+    if (!viewShotRef.current) return;
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Gallery save is not available on web.'); return; }
+    setExporting(true);
+    try {
+      const uri: string = await (viewShotRef.current as any).capture();
+      const MediaLibrary = await import('expo-media-library');
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission denied', 'Allow photo library access to save to gallery.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved', 'Company stamp saved to your photo gallery.');
+    } catch (e: any) {
+      Alert.alert('Save failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const inp = (key: keyof CompanyConfig, placeholder: string, label: string) => (
     <View style={{ gap: 4, marginBottom: 12 }} key={key}>
       <Text style={[styles.fieldLabel, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>{label}</Text>
@@ -338,6 +356,18 @@ export default function CompanyStampScreen() {
           <MaterialCommunityIcons name="share-variant" size={20} color={STAMP_COLOR} />
           <Text style={[styles.shareBtnText, { color: STAMP_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Share</Text>
         </TouchableOpacity>
+
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={[styles.shareBtn, { borderColor: STAMP_COLOR, borderRadius: colors.radius }]}
+            onPress={handleSaveToGallery}
+            disabled={exporting}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="image-outline" size={20} color={STAMP_COLOR} />
+            <Text style={[styles.shareBtnText, { color: STAMP_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Save to Gallery</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </View>
   );

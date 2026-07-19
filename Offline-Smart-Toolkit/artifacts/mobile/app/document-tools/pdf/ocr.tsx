@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView, Platform, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useColors } from '@/hooks/useColors';
@@ -10,6 +10,7 @@ import { DocUploadWidget } from '@/components/document-tools/DocUploadWidget';
 import type { DocPickResult } from '@/components/document-tools/DocUploadWidget';
 import { runOcr } from '@/lib/features/documents/ocr/ocrService';
 import type { OcrResult } from '@/lib/features/documents/types';
+import { exportFile } from '@/lib/photoTools/exportUtils';
 
 const COLOR = '#EF4444';
 
@@ -139,6 +140,42 @@ export default function OcrScreen() {
             <MaterialCommunityIcons name={copied ? 'check' : 'content-copy'} size={18} color="#fff" />
             <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
               {copied ? 'Copied!' : 'Copy to Clipboard'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.btn, { backgroundColor: colors.card, borderColor: COLOR, borderWidth: 1, borderRadius: colors.radius - 2 }]}
+            onPress={async () => {
+              if (!ocrResult?.text) return;
+              try {
+                const text = ocrResult.text;
+                const fileName = `ocr-result-${Date.now()}.txt`;
+                if (Platform.OS === 'web') {
+                  const blob = new Blob([text], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = fileName;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                } else {
+                  const FileSystem = await import('expo-file-system');
+                  const dir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory;
+                  const fileUri = `${dir}${fileName}`;
+                  await (FileSystem as any).writeAsStringAsync(fileUri, text, { encoding: 'utf8' as any });
+                  await exportFile(fileUri, fileName);
+                }
+              } catch (e: any) {
+                Alert.alert('Export failed', e?.message ?? 'Unknown error');
+              }
+            }}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="file-export-outline" size={18} color={COLOR} />
+            <Text style={[styles.btnText, { color: COLOR, fontFamily: 'Inter_600SemiBold' }]}>
+              Download as Text File
             </Text>
           </TouchableOpacity>
 

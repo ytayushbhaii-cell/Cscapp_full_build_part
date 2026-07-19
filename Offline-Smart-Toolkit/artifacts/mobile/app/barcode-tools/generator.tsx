@@ -66,12 +66,16 @@ export default function BarcodeGeneratorScreen() {
   const svgWidth = Math.round(totalWidth * scale);
   const svgHeight = BAR_HEIGHT + LABEL_HEIGHT + 12;
 
+  const captureBarcode = async (): Promise<string> => {
+    if (!viewShotRef.current) throw new Error('View not ready');
+    return (viewShotRef.current as any).capture();
+  };
+
   const handleExport = async () => {
     if (!segments) { Alert.alert('Nothing to export', 'Enter valid content first.'); return; }
-    if (!viewShotRef.current) return;
     setExporting(true);
     try {
-      const uri: string = await (viewShotRef.current as any).capture();
+      const uri = await captureBarcode();
       const fileName = `Barcode-${format}-${Date.now()}.png`;
       await addHistoryEntry({
         category: 'barcode',
@@ -83,6 +87,63 @@ export default function BarcodeGeneratorScreen() {
       await exportFile(uri, fileName);
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!segments) { Alert.alert('Nothing to share', 'Enter valid content first.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureBarcode();
+      const fileName = `Barcode-${format}-${Date.now()}.png`;
+      await addHistoryEntry({
+        category: 'barcode',
+        toolId: 'barcode-generator',
+        title: `Barcode ${format}`,
+        detail: inputText,
+        outputUri: uri,
+      });
+      if (Platform.OS === 'web') {
+        try {
+          const res = await fetch(uri);
+          const blob = await res.blob();
+          const file = new File([blob], fileName, { type: 'image/png' });
+          if ((navigator as any).canShare?.({ files: [file] })) {
+            await (navigator as any).share({ files: [file], title: 'Barcode' });
+            return;
+          }
+        } catch { /* fall through to download */ }
+        await exportFile(uri, fileName);
+      } else {
+        const Sharing = await import('expo-sharing');
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share Barcode' });
+        } else {
+          await exportFile(uri, fileName);
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Share failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    if (!segments) { Alert.alert('Nothing to save', 'Enter valid content first.'); return; }
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Gallery save is not available on web.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureBarcode();
+      const MediaLibrary = await import('expo-media-library');
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission denied', 'Allow photo library access to save to gallery.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved', 'Barcode saved to your photo gallery.');
+    } catch (e: any) {
+      Alert.alert('Save failed', e?.message ?? 'Unknown error');
     } finally {
       setExporting(false);
     }
@@ -194,12 +255,23 @@ export default function BarcodeGeneratorScreen() {
 
         <TouchableOpacity
           style={[styles.shareBtn, { borderColor: BARCODE_COLOR, borderRadius: colors.radius, opacity: segments ? 1 : 0.45 }]}
-          onPress={handleExport}
+          onPress={handleShare}
           disabled={!segments || exporting}
         >
           <MaterialCommunityIcons name="share-variant" size={20} color={BARCODE_COLOR} />
           <Text style={[styles.shareBtnText, { color: BARCODE_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Share</Text>
         </TouchableOpacity>
+
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={[styles.shareBtn, { borderColor: BARCODE_COLOR, borderRadius: colors.radius, opacity: segments ? 1 : 0.45 }]}
+            onPress={handleSaveToGallery}
+            disabled={!segments || exporting}
+          >
+            <MaterialCommunityIcons name="image-outline" size={20} color={BARCODE_COLOR} />
+            <Text style={[styles.shareBtnText, { color: BARCODE_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Save to Gallery</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </View>
   );

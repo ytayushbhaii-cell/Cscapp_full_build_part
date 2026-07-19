@@ -140,6 +140,24 @@ export default function QRGeneratorScreen() {
     }
   };
 
+  const handleSaveToGallery = async () => {
+    if (!hasValue) { Alert.alert('Empty QR', 'Please enter some content first.'); return; }
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Gallery save is not available on web.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureQR();
+      const MediaLibrary = await import('expo-media-library');
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission denied', 'Allow photo library access to save to gallery.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved', 'QR code saved to your photo gallery.');
+    } catch (e: any) {
+      Alert.alert('Save failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const renderFields = () => {
     const inp = (key: string, placeholder: string, keyboard?: any, multiline?: boolean) => (
       <TextInput
@@ -295,6 +313,18 @@ export default function QRGeneratorScreen() {
           <MaterialCommunityIcons name="share-variant" size={20} color={QR_COLOR} />
           <Text style={[styles.shareBtnText, { color: QR_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Share</Text>
         </TouchableOpacity>
+
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={[styles.shareBtn, { borderColor: QR_COLOR, borderRadius: colors.radius, opacity: hasValue ? 1 : 0.45 }]}
+            onPress={handleSaveToGallery}
+            disabled={!hasValue || exporting}
+            activeOpacity={0.85}
+          >
+            <MaterialCommunityIcons name="image-outline" size={20} color={QR_COLOR} />
+            <Text style={[styles.shareBtnText, { color: QR_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Save to Gallery</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </View>
   );

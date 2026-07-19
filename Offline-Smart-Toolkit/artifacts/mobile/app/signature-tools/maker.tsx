@@ -75,12 +75,16 @@ export default function SignatureMakerScreen() {
     setStrokes((prev) => prev.slice(0, -1));
   };
 
+  const captureSignature = async (): Promise<string> => {
+    if (!viewShotRef.current) throw new Error('Canvas not ready');
+    return (viewShotRef.current as any).capture();
+  };
+
   const handleExport = async () => {
     if (!hasDrawing) { Alert.alert('Empty canvas', 'Please draw your signature first.'); return; }
-    if (!viewShotRef.current) return;
     setExporting(true);
     try {
-      const uri: string = await (viewShotRef.current as any).capture();
+      const uri = await captureSignature();
       const fileName = `Signature-${Date.now()}.png`;
       await addHistoryEntry({
         category: 'signature',
@@ -92,6 +96,63 @@ export default function SignatureMakerScreen() {
       await exportFile(uri, fileName);
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!hasDrawing) { Alert.alert('Empty canvas', 'Please draw your signature first.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureSignature();
+      const fileName = `Signature-${Date.now()}.png`;
+      await addHistoryEntry({
+        category: 'signature',
+        toolId: 'signature-maker',
+        title: 'Signature',
+        detail: `${strokes.length} strokes`,
+        outputUri: uri,
+      });
+      if (Platform.OS === 'web') {
+        try {
+          const res = await fetch(uri);
+          const blob = await res.blob();
+          const file = new File([blob], fileName, { type: 'image/png' });
+          if ((navigator as any).canShare?.({ files: [file] })) {
+            await (navigator as any).share({ files: [file], title: 'Signature' });
+            return;
+          }
+        } catch { /* fall through to download */ }
+        await exportFile(uri, fileName);
+      } else {
+        const Sharing = await import('expo-sharing');
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share Signature' });
+        } else {
+          await exportFile(uri, fileName);
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Share failed', e?.message ?? 'Unknown error');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    if (!hasDrawing) { Alert.alert('Empty canvas', 'Please draw your signature first.'); return; }
+    if (Platform.OS === 'web') { Alert.alert('Not supported', 'Gallery save is not available on web.'); return; }
+    setExporting(true);
+    try {
+      const uri = await captureSignature();
+      const MediaLibrary = await import('expo-media-library');
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission denied', 'Allow photo library access to save to gallery.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Saved', 'Signature saved to your photo gallery.');
+    } catch (e: any) {
+      Alert.alert('Save failed', e?.message ?? 'Unknown error');
     } finally {
       setExporting(false);
     }
@@ -237,12 +298,23 @@ export default function SignatureMakerScreen() {
 
         <TouchableOpacity
           style={[styles.shareBtn, { borderColor: SIG_COLOR, borderRadius: colors.radius, opacity: hasDrawing ? 1 : 0.45 }]}
-          onPress={handleExport}
+          onPress={handleShare}
           disabled={!hasDrawing || exporting}
         >
           <MaterialCommunityIcons name="share-variant" size={20} color={SIG_COLOR} />
           <Text style={[styles.shareBtnText, { color: SIG_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Share</Text>
         </TouchableOpacity>
+
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity
+            style={[styles.shareBtn, { borderColor: SIG_COLOR, borderRadius: colors.radius, opacity: hasDrawing ? 1 : 0.45 }]}
+            onPress={handleSaveToGallery}
+            disabled={!hasDrawing || exporting}
+          >
+            <MaterialCommunityIcons name="image-outline" size={20} color={SIG_COLOR} />
+            <Text style={[styles.shareBtnText, { color: SIG_COLOR, fontFamily: 'Inter_600SemiBold' }]}>Save to Gallery</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={[styles.tipCard, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <MaterialCommunityIcons name="lightbulb-outline" size={18} color={SIG_COLOR} />

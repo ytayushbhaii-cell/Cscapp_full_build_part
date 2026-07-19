@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Switch, Platform, Alert } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
@@ -9,7 +9,8 @@ import { ResultActions } from '@/components/photo-tools/ResultActions';
 import { ProcessingSteps, makeSteps, updateStep } from '@/components/photo-tools/ProcessingSteps';
 import { resizeImage, compressImage } from '@/lib/photoTools/imageOps';
 import { addRecentFile, recordToolUsage } from '@/lib/photoTools/db';
-import { guessFileName } from '@/lib/photoTools/exportUtils';
+import { guessFileName, exportFile } from '@/lib/photoTools/exportUtils';
+import { buildZipFromImages } from '@/lib/photoTools/zipUtils';
 import * as ImagePicker from 'expo-image-picker';
 
 const COLOR = '#10B981';
@@ -134,6 +135,30 @@ export default function BatchResizeScreen() {
               {results.length} photos resized to {preset.label} ({preset.w}px)
             </Text>
           </View>
+
+          {/* ZIP download for all results */}
+          {results.length > 1 && (
+            <TouchableOpacity
+              style={[styles.btn, { backgroundColor: COLOR, borderRadius: colors.radius - 2 }]}
+              onPress={async () => {
+                try {
+                  const zipUri = await buildZipFromImages(
+                    results.map((r) => ({ uri: r.uri, fileName: r.name }))
+                  );
+                  await exportFile(zipUri, `batch-resize-${Date.now()}.zip`);
+                } catch (e: any) {
+                  Alert.alert('ZIP export failed', e?.message ?? 'Unknown error');
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <MaterialCommunityIcons name="folder-zip-outline" size={18} color="#fff" />
+              <Text style={[styles.btnText, { color: '#fff', fontFamily: 'Inter_600SemiBold' }]}>
+                Download All as ZIP ({results.length} files)
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {results.map((r) => (
             <ResultActions key={r.uri} uri={r.uri} fileName={r.name} color={COLOR} onReset={() => {}} />
           ))}

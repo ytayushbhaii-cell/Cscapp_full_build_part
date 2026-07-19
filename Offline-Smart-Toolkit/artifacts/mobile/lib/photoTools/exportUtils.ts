@@ -20,8 +20,8 @@ export async function writePngFromRGBA(rgba: Uint8ClampedArray, width: number, h
 }
 
 /** Persists a base64 payload to a file (native) or a data: URI (web) and returns the URI. */
-export async function writeBase64Image(base64: string, ext: 'png' | 'jpg' = 'png'): Promise<string> {
-  const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+export async function writeBase64Image(base64: string, ext: 'png' | 'jpg' | 'webp' = 'png'): Promise<string> {
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
   if (Platform.OS === 'web') {
     return base64ToDataUri(base64, mime);
   }
@@ -29,6 +29,54 @@ export async function writeBase64Image(base64: string, ext: 'png' | 'jpg' = 'png
   const fileUri = `${dir}photo-tools-${Date.now()}-${Math.round(Math.random() * 1e6)}.${ext}`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: 'base64' as const });
   return fileUri;
+}
+
+/**
+ * Convert an existing image URI to WEBP format.
+ * On web, uses Canvas toDataURL('image/webp') — all modern browsers support it.
+ * On native, uses expo-image-manipulator with SaveFormat.WEBP when available;
+ * falls back to JPEG and labels the file .jpg so the extension always matches
+ * the actual byte content.
+ *
+ * Returns { uri, ext } so callers can use the correct file extension.
+ */
+export async function convertToWebP(
+  uri: string,
+  quality = 0.88
+): Promise<{ uri: string; ext: 'webp' | 'jpg' }> {
+  if (Platform.OS === 'web') {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const img = new window.Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/webp', quality));
+      };
+      img.onerror = () => reject(new Error('Failed to load image for WEBP conversion'));
+      img.src = uri;
+    });
+    return { uri: dataUrl, ext: 'webp' };
+  }
+
+  // Native: check if WEBP SaveFormat is available (Expo SDK ≥ 49 on some platforms)
+  const ImageManipulator = await import('expo-image-manipulator');
+  const SaveFormat = (ImageManipulator as any).SaveFormat;
+  const hasWebP = Boolean(SaveFormat?.WEBP);
+  const format = hasWebP ? SaveFormat.WEBP : (SaveFormat?.JPEG ?? 'jpeg');
+  const ext: 'webp' | 'jpg' = hasWebP ? 'webp' : 'jpg';
+
+  const result = await (ImageManipulator as any).manipulateAsync(uri, [], {
+    compress: quality,
+    format,
+  });
+  const dir = (FileSystem as any).cacheDirectory ?? (FileSystem as any).documentDirectory;
+  const dest = `${dir}photo-${ext}-${Date.now()}.${ext}`;
+  await FileSystem.copyAsync({ from: result.uri, to: dest });
+  return { uri: dest, ext };
 }
 
 export function guessFileName(prefix: string, ext: string): string {
@@ -49,7 +97,15 @@ export async function exportFile(uri: string, fileName: string): Promise<void> {
   const Sharing = await import('expo-sharing');
   const canShare = await Sharing.isAvailableAsync();
   if (canShare) {
-    await Sharing.shareAsync(uri);
+    // Detect MIME type from file name extension
+    const lower = fileName.toLowerCase();
+    const mimeType =
+      lower.endsWith('.png')  ? 'image/png'       :
+      lower.endsWith('.webp') ? 'image/webp'       :
+      lower.endsWith('.pdf')  ? 'application/pdf'  :
+      lower.endsWith('.zip')  ? 'application/zip'  :
+      'image/jpeg';
+    await Sharing.shareAsync(uri, { mimeType });
   }
 }
 
