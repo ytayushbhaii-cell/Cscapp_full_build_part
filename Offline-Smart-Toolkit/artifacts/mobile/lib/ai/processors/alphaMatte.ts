@@ -11,8 +11,8 @@
  *    boundary refinement so the trimap is clean.
  *
  *  Stage 2 — SAM2-style boundary refinement
- *    Trimap generation (erode/dilate) + gradient-weighted propagation
- *    in the uncertain boundary zone. Wide margins to capture fine hair.
+ *    Thin-structure-aware trimap (small erosion preserves fingers/thin hair)
+ *    + gradient-weighted propagation with 5 iterations.
  *
  *  Stage 3 — Quad-pass guided filter (PyMatting-equivalent)
  *    Pass 1: r=20  — global structure
@@ -21,15 +21,17 @@
  *    Pass 4: r=1   — ultra-fine micro-strands (boundary zone only)
  *    Each pass is color-guided (R/G/B) for maximum edge accuracy.
  *
- *  Stage 4 — Hair refinement (HD mode extra pass)
- *    r=1, ε=1e-8: recovers individual fly-away strands lost in Stage 3.
+ *  Stage 4 — Hair refinement (always active for images ≥ 128px)
+ *    r=1, ε=1e-8: recovers individual fly-away strands and fine finger edges.
  *
- *  Stage 5 — Color decontamination (halo removal)
- *    Removes background-color fringing from semi-transparent edge pixels
- *    ("white halo", "blue fringe"). Uses actual background color sample.
- *
- *  Stage 6 — Edge feathering + anti-aliasing + S-curve sharpening
+ *  Stage 5 — Edge feathering + anti-aliasing + S-curve + hard-clip cleanup
  *    Feather radius auto-tuned to image size.
+ *    Hard-clip removes remaining background speckles (alpha < 0.04 → 0).
+ *
+ *  Stage 6 — Color decontamination (halo removal)
+ *    Removes background-color fringing for ANY background color
+ *    (white, blue, purple, green, …).  Uses actual sampled background color
+ *    — never hardcoded fallbacks.
  *
  * All stages are pure TypeScript — zero external dependencies.
  */
@@ -38,7 +40,7 @@ import { guidedFilterTriplePass } from './guidedFilter';
 import { sam2StyleRefinement } from './maskRefine';
 import { erode, dilate } from './maskRefine';
 import { applyEdgePostProcessing } from './edgeOps';
-import { removeWhiteHalo, erodeAlphaEdge } from './haloRemoval';
+import { removeWhiteHalo, erodeAlphaEdge, removeSpeckles } from './haloRemoval';
 import { guidedFilterRGBA } from './guidedFilter';
 
 // ─── Separable box blur on a Float32 mono-channel ────────────────────────────
@@ -158,12 +160,14 @@ export function fillSubjectHoles(
 // ─── Stage 4: Hair-specific refinement pass ───────────────────────────────────
 
 /**
- * Ultra-fine guided filter pass specifically tuned for hair strands.
- * Very small radius (r=1) and tiny epsilon (ε=1e-8) to recover individual
- * fly-away hairs that broader passes smear over.
+ * Ultra-fine guided filter pass specifically tuned for hair strands and fine
+ * finger edges.  Very small radius (r=1) and tiny epsilon (ε=1e-8) recovers
+ * individual fly-away hairs and thin finger outlines.
  *
- * Applied only in the boundary zone (0.02 < α < 0.98) to avoid
- * introducing noise in confident interior/background regions.
+ * Applied in the boundary zone (0.02 < α < 0.98) to avoid introducing noise
+ * in confident interior/background regions.
+ *
+ * Active for ALL segmentation runs on images ≥ 128px (not just HD mode).
  */
 function hairRefinementPass(
   alpha: Float32Array,
@@ -188,7 +192,7 @@ function hairRefinementPass(
 // ─── Main refinement pipeline ──────────────────────────────────────────────────
 
 export interface RefineOptions {
-  /** HD mode: enables extra hair refinement pass and stronger decontamination */
+  /** HD mode: preserved for API compatibility but hair refinement now always runs */
   hd?: boolean;
   /** Skip hole filling (for masks that are already clean) */
   skipHoleFill?: boolean;
@@ -197,8 +201,14 @@ export interface RefineOptions {
 /**
  * Full professional post-processing pipeline for ANY coarse alpha input.
  *
- * Applies Stages 1–6 to produce a near remove.bg quality soft alpha.
+ * Applies Stages 1–5 to produce a near remove.bg quality soft alpha.
  * Used by every segmentation backend (BiRefNet, U2Net, BodyPix).
+ *
+ * Changes vs previous version:
+ *  - Hair refinement now ALWAYS active (was HD-only) — improves fingers too
+ *  - Trimap erosion radius reduced (0.015 → 0.008) to preserve thin structures
+ *  - SAM2 propagation increased to 5 iterations
+ *  - Hard-clip cleanup added to applyEdgePostProcessing
  *
  * @param coarseAlpha - raw segmentation output (0–1, w*h)
  * @param pixels      - original RGBA pixels (same resolution)
@@ -222,7 +232,7 @@ export function refineAlpha(
   }
 
   // Stage 2: SAM2-style boundary refinement
-  // Wide trimap margins capture finer hair/clothing edges
+  // Small erosion radius preserves thin structures (fingers, hair strands)
   alpha = sam2StyleRefinement(alpha, pixels, w, h);
 
   // Stage 3: Quad-pass guided filter — sub-pixel + micro-strand precision
@@ -230,12 +240,13 @@ export function refineAlpha(
     alpha = guidedFilterTriplePass(pixels, alpha, w, h);
   }
 
-  // Stage 4: Hair refinement (HD mode — extra ultra-fine pass)
-  if (opts.hd && w >= 128 && h >= 128) {
+  // Stage 4: Hair & fine-detail refinement — always active (was HD-only)
+  // Recovers fly-away hair strands and thin finger contours
+  if (w >= 128 && h >= 128) {
     alpha = hairRefinementPass(alpha, pixels, w, h);
   }
 
-  // Stage 5/6: Edge polish — adaptive feather radius + anti-aliasing + S-curve
+  // Stage 5: Edge polish — adaptive feather + anti-aliasing + S-curve + hard-clip
   const fPx = Math.max(3, featherRadius(w, h));
   alpha = applyEdgePostProcessing(alpha, w, h, fPx);
 
@@ -248,7 +259,7 @@ export function refineAlpha(
  * Full professional alpha matting for BINARY mask inputs (BodyPix).
  *
  * Stage 0 — Coarse alpha: box-blur + color-confidence (binary → soft)
- * Stages 1–6 — Same shared refineAlpha() contract as ONNX backends.
+ * Stages 1–5 — Same shared refineAlpha() contract as ONNX backends.
  */
 export function computeSoftAlpha(
   mask: Uint8Array,
@@ -271,7 +282,8 @@ export function computeSoftAlpha(
  * Composites RGBA pixels against transparency or a solid colour.
  *
  * For transparent output (bgColor = null):
- *   - Applies color decontamination (white/color halo removal)
+ *   - Applies full-spectrum color decontamination (handles blue/purple/any halo)
+ *   - Removes background pixel speckles
  *   - Applies a 1px soft alpha erosion to eliminate remaining fringe
  *
  * For solid-colour output:
@@ -289,12 +301,18 @@ export function compositeWithSoftAlpha(
   out.set(pixels);
 
   if (bgColor === null) {
-    // Transparent: decontaminate edge colors, embed alpha
-    // searchR=24, strength=0.95 for stronger color spill removal
-    removeWhiteHalo(pixels, out, alpha, width, height, 24, 0.95);
-    const erodedAlpha = erodeAlphaEdge(alpha, width, height, 1);
+    // Transparent: full-spectrum halo removal (handles any background color)
+    // searchR=24, strength=0.92 for thorough color spill removal
+    removeWhiteHalo(pixels, out, alpha, width, height, 24, 0.92);
+
+    // Remove isolated background speckles before embedding alpha
+    let finalAlpha = removeSpeckles(alpha, width, height, 0.08);
+
+    // Soft erosion: removes remaining fringe that RGB correction misses
+    finalAlpha = erodeAlphaEdge(finalAlpha, width, height, 1);
+
     for (let i = 0; i < n; i++) {
-      out[i * 4 + 3] = Math.round(erodedAlpha[i] * 255);
+      out[i * 4 + 3] = Math.round(finalAlpha[i] * 255);
     }
     return out;
   }

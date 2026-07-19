@@ -5,6 +5,7 @@
  *  - Bilateral filter (edge-preserving smoothing) — replaces OpenCV bilateralFilter
  *  - Feathered edge smoothing for alpha maps — replaces OpenCV GaussianBlur on mask
  *  - Anti-aliasing for alpha boundaries — sub-pixel edge quality
+ *  - Alpha hard-clip cleanup — removes remaining low-alpha background speckles
  *  - Morphological gradient (for edge detection)
  *
  * All algorithms are separable / O(N) where possible.
@@ -90,7 +91,6 @@ export function featherAlphaEdge(
   h: number,
   featherPx = 2,
 ): Float32Array {
-  const n = w * h;
   const r = featherPx;
   const out = new Float32Array(alpha);
 
@@ -144,7 +144,6 @@ export function featherAlphaEdge(
  * @param h      - image height
  */
 export function antiAliasAlpha(alpha: Float32Array, w: number, h: number): Float32Array {
-  const n = w * h;
   const out = new Float32Array(alpha);
 
   for (let y = 1; y < h - 1; y++) {
@@ -195,6 +194,40 @@ export function sharpensAlphaCurve(alpha: Float32Array, sharpness = 1.1): Float3
   return out;
 }
 
+// ─── Hard-clip cleanup ────────────────────────────────────────────────────────
+
+/**
+ * Final hard-clip pass that removes remaining background pixel residue.
+ *
+ * After all refinement, some pixels near the background may still have tiny
+ * non-zero alpha values (0.01–0.06) that are invisible individually but
+ * collectively cause a "dirty" transparent output.  This clamps them to 0.
+ *
+ * Similarly, pixels very close to 1 (>0.97) are snapped to 1 to ensure
+ * the subject interior is fully opaque.
+ *
+ * Fine-detail preservation: pixels in the 0.06–0.94 range are left untouched
+ * so hair strands and soft edges are fully preserved.
+ *
+ * @param alpha     - alpha map (Float32Array, 0-1)
+ * @param loThresh  - values below this → 0 (default 0.04)
+ * @param hiThresh  - values above this → 1 (default 0.97)
+ */
+export function hardClipAlpha(
+  alpha: Float32Array,
+  loThresh = 0.04,
+  hiThresh = 0.97,
+): Float32Array {
+  const out = new Float32Array(alpha.length);
+  for (let i = 0; i < alpha.length; i++) {
+    const a = alpha[i];
+    if (a <= loThresh) out[i] = 0;
+    else if (a >= hiThresh) out[i] = 1;
+    else out[i] = a;
+  }
+  return out;
+}
+
 // ─── Full edge post-processing chain ─────────────────────────────────────────
 
 /**
@@ -202,9 +235,7 @@ export function sharpensAlphaCurve(alpha: Float32Array, sharpness = 1.1): Float3
  *  1. Feathering (1-3px Gaussian)
  *  2. Sub-pixel anti-aliasing
  *  3. S-curve sharpening
- *
- * This is the "edge quality" step that replaces OpenCV GaussianBlur +
- * morphological operations in the Python pipeline.
+ *  4. Hard-clip cleanup (removes background speckles, solidifies interior)
  *
  * @param alpha    - coarse alpha map
  * @param w        - image width
@@ -220,5 +251,7 @@ export function applyEdgePostProcessing(
   let a = featherAlphaEdge(alpha, w, h, featherPx);
   a = antiAliasAlpha(a, w, h);
   a = sharpensAlphaCurve(a, 1.2);
+  // Final cleanup: snap near-zero pixels to 0, near-one to 1
+  a = hardClipAlpha(a, 0.04, 0.97);
   return a;
 }

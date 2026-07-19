@@ -11,12 +11,18 @@
  *  - Gradient-weighted region growing for boundary classification
  *  - Iterative alpha refinement using local image statistics
  *
+ * Thin-structure preservation (fingers, hair strands):
+ *  The erosion radius is kept small relative to the image so that thin
+ *  appendages (≥8px wide) stay in the "uncertain" trimap zone rather than
+ *  being fully eroded away.  The gradient propagation then correctly
+ *  classifies them as foreground.
+ *
  * Works offline, zero external dependencies.
  */
 
 // ─── Morphological operations ─────────────────────────────────────────────────
 
-/** 
+/**
  * Erodes a float alpha map by `r` pixels.
  * Pixels near bg boundary are pulled toward 0 (shrinks fg region).
  */
@@ -41,7 +47,7 @@ export function erode(alpha: Float32Array, w: number, h: number, r: number): Flo
   return out;
 }
 
-/** 
+/**
  * Dilates a float alpha map by `r` pixels.
  * Pixels near fg boundary are pulled toward 1 (expands fg region).
  */
@@ -71,17 +77,22 @@ export function dilate(alpha: Float32Array, w: number, h: number, r: number): Fl
 export type Trimap = Uint8Array; // 0=definite bg, 1=uncertain, 2=definite fg
 
 /**
- * Generates a trimap from an alpha map:
- *  - Erode the mask → definite foreground (alpha=2)
- *  - Dilate the mask → outer boundary of uncertain zone
- *  - Pixels between eroded and dilated → uncertain (alpha=1)
- *  - Pixels outside dilated → definite background (alpha=0)
+ * Generates a trimap from an alpha map with thin-structure preservation.
+ *
+ * Key design decision: the erosion radius is deliberately kept small
+ * (≤0.8% of image short side, max 8px) so that thin structures like fingers
+ * (typically ≥10px wide) are NOT fully eroded away.  This keeps them in the
+ * "uncertain" zone where gradient propagation can correctly label them as
+ * foreground.
+ *
+ * The dilation radius is kept larger (≤3% of short side) to ensure the
+ * uncertain zone extends far enough to capture hair and clothing edges.
  *
  * @param alpha   - soft alpha map (Float32Array, 0-1), length = w*h
  * @param w       - image width
  * @param h       - image height
- * @param erosR   - erosion radius (default: ~1% of min dimension)
- * @param dilR    - dilation radius (default: ~1.5% of min dimension)
+ * @param erosR   - erosion radius (default: ~0.8% of min dimension, max 8px)
+ * @param dilR    - dilation radius (default: ~3% of min dimension, min 8px)
  */
 export function generateTrimap(
   alpha: Float32Array,
@@ -91,13 +102,15 @@ export function generateTrimap(
   dilR?: number,
 ): Trimap {
   const shortSide = Math.min(w, h);
-  // Wider margins vs v1 (1% → 1.5% erosion, 1.5% → 2.5% dilation):
-  // captures finer clothing/hair boundaries that were previously classified
-  // as definite foreground/background and skipped during refinement.
-  const eR = erosR ?? Math.max(4, Math.round(shortSide * 0.015));
-  const dR = dilR  ?? Math.max(8, Math.round(shortSide * 0.025));
 
-  // For performance on large images, work with binarized mask
+  // Small erosion → keeps thin structures (fingers, hair) in uncertain zone.
+  // Max 8px prevents removing appendages narrower than ~16px.
+  const eR = erosR ?? Math.min(8, Math.max(3, Math.round(shortSide * 0.008)));
+
+  // Wide dilation → uncertain zone captures hair, clothing texture, flyaways.
+  const dR = dilR  ?? Math.max(8, Math.round(shortSide * 0.030));
+
+  // Work with binarized mask for performance on large images
   const binary = new Float32Array(alpha.length);
   for (let i = 0; i < alpha.length; i++) binary[i] = alpha[i] > 0.5 ? 1 : 0;
 
@@ -151,7 +164,7 @@ function computeGradient(pixels: Uint8ClampedArray, w: number, h: number): Float
  * @param pixels  - original RGBA pixels (used for gradient)
  * @param w       - image width
  * @param h       - image height
- * @param iters   - number of propagation iterations (default 3)
+ * @param iters   - number of propagation iterations (default 5)
  */
 export function refineMaskBoundary(
   alpha: Float32Array,
@@ -159,7 +172,7 @@ export function refineMaskBoundary(
   pixels: Uint8ClampedArray,
   w: number,
   h: number,
-  iters = 3,
+  iters = 5,
 ): Float32Array {
   const n = w * h;
   const grad = computeGradient(pixels, w, h);
@@ -198,7 +211,7 @@ export function refineMaskBoundary(
 
         const propagated = wSum > 0 ? sum / wSum : cur[i];
         // Blend: in flat regions rely more on propagation, on edges keep original
-        next[i] = cur[i] * (1 - edgeFactor * 0.6) + propagated * edgeFactor * 0.6;
+        next[i] = cur[i] * (1 - edgeFactor * 0.65) + propagated * edgeFactor * 0.65;
       }
     }
     cur = next;
@@ -215,8 +228,8 @@ export function refineMaskBoundary(
 
 /**
  * Full SAM2-style refinement pipeline:
- *  1. Generate trimap from coarse alpha
- *  2. Gradient-weighted propagation in uncertain zone
+ *  1. Generate trimap from coarse alpha (thin-structure–aware erosion)
+ *  2. Gradient-weighted propagation in uncertain zone (5 iterations)
  *  3. Return refined alpha
  */
 export function sam2StyleRefinement(
@@ -226,6 +239,6 @@ export function sam2StyleRefinement(
   h: number,
 ): Float32Array {
   const trimap = generateTrimap(alpha, w, h);
-  // 4 iterations (was 3): extra pass improves hair/clothing boundary convergence
-  return refineMaskBoundary(alpha, trimap, pixels, w, h, 4);
+  // 5 iterations: extra passes improve finger / hair boundary convergence
+  return refineMaskBoundary(alpha, trimap, pixels, w, h, 5);
 }
