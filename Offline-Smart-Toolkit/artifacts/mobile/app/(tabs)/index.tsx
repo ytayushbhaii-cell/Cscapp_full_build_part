@@ -1,8 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, Animated, Image } from 'react-native';
 import { useRouter } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
@@ -26,19 +24,14 @@ export default function SplashScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.8)).current;
+  const scale   = useRef(new Animated.Value(0.8)).current;
   const taglineOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.sequence([
       Animated.parallel([
         Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.spring(scale, {
-          toValue: 1,
-          tension: 70,
-          friction: 7,
-          useNativeDriver: true,
-        }),
+        Animated.spring(scale, { toValue: 1, tension: 70, friction: 7, useNativeDriver: true }),
       ]),
       Animated.delay(300),
       Animated.timing(taglineOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
@@ -52,22 +45,16 @@ export default function SplashScreen() {
   }, []);
 
   return (
-    <LinearGradient
-      colors={['#0F172A', '#1E3A5F', '#1D4ED8']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-    >
-      <StatusBar style="light" />
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <StatusBar style="dark" />
 
-      <Animated.View
-        style={[styles.content, { opacity, transform: [{ scale }] }]}
-      >
+      <Animated.View style={[styles.content, { opacity, transform: [{ scale }] }]}>
         <View style={styles.logoWrapper}>
-          <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.logoBox}>
-            <MaterialCommunityIcons name="tools" size={52} color="#FFFFFF" />
-          </LinearGradient>
-          {/* Glow ring */}
+          <Image
+            source={require('../../assets/images/splash-icon.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
           <View style={styles.glowRing} />
         </View>
 
@@ -86,13 +73,14 @@ export default function SplashScreen() {
         </View>
         <Text style={styles.loadingText}>Loading app...</Text>
       </Animated.View>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -104,34 +92,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logoBox: {
-    width: 104,
-    height: 104,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 16,
-    ...Platform.select({ web: { boxShadow: '0 8px 24px rgba(59,130,246,0.6)' } as any, default: { shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 24 } }),
+  logoImage: {
+    width: 120,
+    height: 120,
   },
   glowRing: {
     position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 34,
+    width: 150,
+    height: 150,
+    borderRadius: 40,
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.3)',
+    borderColor: 'rgba(59,130,246,0.2)',
   },
   appName: {
     fontSize: 30,
     fontFamily: 'Inter_700Bold',
-    color: '#FFFFFF',
+    color: '#0F172A',
     textAlign: 'center',
     letterSpacing: -0.5,
   },
   tagline: {
     fontSize: 15,
     fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.65)',
+    color: 'rgba(15,23,42,0.55)',
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -151,7 +134,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(15,23,42,0.40)',
     letterSpacing: 0.5,
   },
 });
