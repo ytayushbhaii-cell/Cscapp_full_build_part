@@ -27,7 +27,7 @@ export default function StudentIDScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
-  const topPad = Platform.OS === 'web' ? 24 : insets.top;
+  const topPad = Platform.OS === 'web' ? 30 : insets.top;
   const botPad = Platform.OS === 'web' ? 24 : insets.bottom;
 
   const [data, setData] = useState<StudentIDData>({ ...DEFAULT_STUDENT });

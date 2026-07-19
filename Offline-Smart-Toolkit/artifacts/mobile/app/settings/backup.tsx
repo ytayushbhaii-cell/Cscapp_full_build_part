@@ -31,7 +31,7 @@ export default function BackupSettingsScreen() {
   const [busyRestore,   setBusyRestore]   = useState(false);
   const [showRestore,   setShowRestore]   = useState(false);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const loadMeta = useCallback(async () => {

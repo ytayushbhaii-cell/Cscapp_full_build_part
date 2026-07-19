@@ -13,18 +13,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { DRAWER_WIDTH, useDrawer } from '@/context/DrawerContext';
-
-const NAV_ITEMS = [
-  { label: 'Dashboard',       icon: 'view-dashboard-outline',  route: '/dashboard' },
-  { label: 'Tools',           icon: 'tools',                   route: '/tools' },
-  { label: 'Photo Tools',     icon: 'image-multiple',          route: '/photo-tools' },
-  { label: 'Search',          icon: 'magnify',                 route: '/search' },
-  { label: 'Favorites',       icon: 'heart-outline',           route: '/favorites' },
-  { label: 'Recent Files',    icon: 'clock-outline',           route: '/recent' },
-  { label: 'Most Used',       icon: 'chart-bar',               route: '/most-used' },
-  { label: 'History',         icon: 'history',                 route: '/history' },
-  { label: 'Settings',        icon: 'cog-outline',             route: '/settings' },
-] as const;
+import { useT } from '@/lib/i18n';
 
 // Visual separators — inserted before these route indices
 const SEPARATORS_BEFORE: Set<number> = new Set([3, 8]);
@@ -35,6 +24,19 @@ export function AppDrawer() {
   const { isOpen, closeDrawer, translateX, overlayOpacity } = useDrawer();
   const router   = useRouter();
   const pathname = usePathname();
+  const t = useT();
+
+  const NAV_ITEMS = [
+    { label: t('nav.dashboard'),   icon: 'view-dashboard-outline', route: '/dashboard' },
+    { label: t('nav.tools'),       icon: 'tools',                  route: '/tools' },
+    { label: t('nav.photoTools'),  icon: 'image-multiple',         route: '/photo-tools' },
+    { label: t('nav.search'),      icon: 'magnify',                route: '/search' },
+    { label: t('nav.favorites'),   icon: 'heart-outline',          route: '/favorites' },
+    { label: t('nav.recentFiles'), icon: 'clock-outline',          route: '/recent' },
+    { label: t('nav.mostUsed'),    icon: 'chart-bar',              route: '/most-used' },
+    { label: t('nav.history'),     icon: 'history',                route: '/history' },
+    { label: t('nav.settings'),    icon: 'cog-outline',            route: '/settings' },
+  ];
 
   if (!isOpen) return null;
 
@@ -75,10 +77,10 @@ export function AppDrawer() {
           </View>
           <View style={styles.headerText}>
             <Text style={[styles.appName, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-              CSC Smart Toolkit
+              {t('app.name')}
             </Text>
             <Text style={[styles.appTagline, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              Complete Offline Toolkit
+              {t('app.tagline')}
             </Text>
           </View>
         </View>
@@ -134,7 +136,7 @@ export function AppDrawer() {
         <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
         <Text style={[styles.version, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-          Version 1.0.0 • 100% Offline
+          {t('drawer.version')}
         </Text>
       </Animated.View>
     </View>

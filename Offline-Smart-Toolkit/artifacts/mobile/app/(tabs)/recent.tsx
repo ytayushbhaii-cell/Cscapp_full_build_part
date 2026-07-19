@@ -15,6 +15,7 @@ import { useDrawer } from '@/context/DrawerContext';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/context/ThemeContext';
 import type { RecentFile } from '@/context/AppContext';
+import { useT } from '@/lib/i18n';
 
 const STATUS_CONFIG: Record<string, { color: string; icon: string }> = {
   Completed: { color: '#10B981', icon: 'check-circle-outline' },
@@ -86,8 +87,9 @@ export default function RecentFilesScreen() {
   const { openDrawer } = useDrawer();
   const { recentFiles } = useApp();
   const { isDark } = useTheme();
+  const t = useT();
 
-  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -109,7 +111,7 @@ export default function RecentFilesScreen() {
           <MaterialCommunityIcons name="menu" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Recent Files
+          {t('tabs.recent')}
         </Text>
         <View style={[styles.badge, { backgroundColor: colors.primary + '18' }]}>
           <Text style={[styles.badgeText, { color: colors.primary, fontFamily: 'Inter_600SemiBold' }]}>
@@ -121,16 +123,16 @@ export default function RecentFilesScreen() {
       {/* Table Header */}
       <View style={[styles.tableHeader, { backgroundColor: colors.muted, borderBottomColor: colors.border }]}>
         <Text style={[styles.th, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold', flex: 2.2 }]}>
-          FILE NAME
+          {t('recent.colFile')}
         </Text>
         <Text style={[styles.th, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold', flex: 1.6 }]}>
-          TOOL
+          {t('recent.colTool')}
         </Text>
         <Text style={[styles.th, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold', flex: 0.8 }]}>
-          DATE
+          {t('recent.colDate')}
         </Text>
         <Text style={[styles.th, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold', flex: 1.4, textAlign: 'center' }]}>
-          STATUS
+          {t('recent.colStatus')}
         </Text>
       </View>
 

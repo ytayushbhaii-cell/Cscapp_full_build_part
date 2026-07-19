@@ -12,6 +12,7 @@ import { useTheme } from '@/context/ThemeContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useApp, type Tool } from '@/context/AppContext';
 import { getTopTools, resetUsage } from '@/lib/features/usage/UsageService';
+import { useT } from '@/lib/i18n';
 
 const TOOL_COLOR = '#F59E0B';
 
@@ -68,11 +69,12 @@ export default function MostUsedToolsScreen() {
   const { openDrawer } = useDrawer();
   const { tools }     = useApp();
   const router  = useRouter();
+  const t = useT();
 
   const [topList, setTopList] = useState<{ toolId: string; count: number }[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const topPadding    = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const load = useCallback(async () => {
@@ -118,7 +120,7 @@ export default function MostUsedToolsScreen() {
           <MaterialCommunityIcons name="menu" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Most Used Tools
+          {t('tabs.mostUsed')}
         </Text>
         {topTools.length > 0 && (
           <TouchableOpacity onPress={handleReset} style={styles.resetBtn}>
@@ -138,9 +140,9 @@ export default function MostUsedToolsScreen() {
             <View style={[styles.hero, { backgroundColor: TOOL_COLOR, borderRadius: colors.radius }]}>
               <MaterialCommunityIcons name="chart-bar" size={32} color="#FFFFFF" />
               <View style={styles.heroText}>
-                <Text style={[styles.heroTitle, { fontFamily: 'Inter_700Bold' }]}>Usage Analytics</Text>
+                <Text style={[styles.heroTitle, { fontFamily: 'Inter_700Bold' }]}>{t('tabs.mostUsed.analytics')}</Text>
                 <Text style={[styles.heroSub, { fontFamily: 'Inter_400Regular' }]}>
-                  Top {topTools.length > 0 ? topTools.length : 10} tools ranked by how often you use them
+                  {t('tabs.mostUsed.analyticsDesc').replace('{n}', String(topTools.length > 0 ? topTools.length : 10))}
                 </Text>
               </View>
             </View>
@@ -167,12 +169,10 @@ export default function MostUsedToolsScreen() {
               <MaterialCommunityIcons name="chart-bar" size={44} color={TOOL_COLOR} />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-              {loading ? 'Loading…' : 'No Usage Data Yet'}
+              {loading ? t('app.loading') : t('tabs.mostUsed.empty')}
             </Text>
             <Text style={[styles.emptyDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-              {loading
-                ? 'Loading your usage statistics…'
-                : 'Start using tools and your most-used ones will appear here automatically.'}
+              {loading ? t('tabs.mostUsed.loading') : t('tabs.mostUsed.emptyDesc')}
             </Text>
           </View>
         )}

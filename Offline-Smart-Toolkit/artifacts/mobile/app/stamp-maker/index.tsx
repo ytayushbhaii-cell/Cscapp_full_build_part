@@ -182,7 +182,7 @@ export default function StampMakerScreen() {
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const [cfg, setCfg] = useState<StampConfig>(DEFAULT_STAMP);

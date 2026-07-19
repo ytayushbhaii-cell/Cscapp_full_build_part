@@ -15,6 +15,7 @@ import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useApp } from '@/context/AppContext';
+import { useT } from '@/lib/i18n';
 import { StatCard } from '@/components/StatCard';
 import { QuickAccessCard } from '@/components/QuickAccessCard';
 import { ToolCard } from '@/components/ToolCard';
@@ -47,6 +48,7 @@ export default function DashboardScreen() {
   const { stats, tools } = useApp();
   const [searchVisible, setSearchVisible] = useState(false);
   const router = useRouter();
+  const t = useT();
 
   const openTool = (toolId: string) => {
     const tool = tools.find((t) => t.id === toolId);
@@ -84,7 +86,7 @@ export default function DashboardScreen() {
               { color: colors.foreground, fontFamily: 'Inter_700Bold' },
             ]}
           >
-            CSC Smart Toolkit
+            {t('app.name')}
           </Text>
         </View>
         <View style={styles.headerActions}>
@@ -124,7 +126,7 @@ export default function DashboardScreen() {
                 { color: colors.foreground, fontFamily: 'Inter_700Bold' },
               ]}
             >
-              Welcome to CSC Smart Toolkit
+              {t('dashboard.welcomeTitle')}
             </Text>
             <Text
               style={[
@@ -132,7 +134,7 @@ export default function DashboardScreen() {
                 { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' },
               ]}
             >
-              Your complete offline toolkit for CSC, Cyber Cafe, Photo Studio and document services.
+              {t('dashboard.welcomeDesc')}
             </Text>
           </View>
           <MaterialCommunityIcons
@@ -143,18 +145,18 @@ export default function DashboardScreen() {
         </View>
 
         {/* Stats */}
-        <SectionTitle title="Overview" />
+        <SectionTitle title={t('dashboard.overview')} />
         <View style={styles.statsGrid}>
           <View style={styles.statsRow}>
             <StatCard
               icon="tools"
-              title="Total Tools"
+              title={t('dashboard.stats.totalTools')}
               value={stats.totalTools}
               gradientColors={['#3B82F6', '#2563EB']}
             />
             <StatCard
               icon="history"
-              title="Recent Files"
+              title={t('dashboard.stats.recentFiles')}
               value={stats.recentFilesCount}
               gradientColors={['#10B981', '#059669']}
             />
@@ -162,7 +164,7 @@ export default function DashboardScreen() {
           <View style={styles.statsRow}>
             <StatCard
               icon="heart"
-              title="Favorites"
+              title={t('dashboard.stats.favorites')}
               value={stats.favoritesCount}
               gradientColors={['#EC4899', '#DB2777']}
             />
@@ -177,7 +179,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* Quick Access */}
-        <SectionTitle title="Quick Access" actionLabel="All Tools" onAction={() => router.push('/tools')} />
+        <SectionTitle title={t('dashboard.quickAccess')} actionLabel={t('dashboard.allTools')} onAction={() => router.push('/tools')} />
         <View style={styles.gridRow}>
           {QUICK_ACCESS.slice(0, 3).map((item) => (
             <QuickAccessCard
@@ -202,7 +204,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* Most Used */}
-        <SectionTitle title="Most Used Tools" />
+        <SectionTitle title={t('dashboard.mostUsed')} />
         <View style={styles.gridRow}>
           {MOST_USED.slice(0, 3).map((item) => (
             <QuickAccessCard

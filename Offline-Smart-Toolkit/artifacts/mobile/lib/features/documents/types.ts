@@ -10,9 +10,11 @@ export interface DocPickedFile {
 export interface DocToolMeta {
   id: string;
   name: string;
+  nameHi: string;
   iconName: string;
   color: string;
   description: string;
+  descHi: string;
   route: string;
   category: DocCategory;
 }

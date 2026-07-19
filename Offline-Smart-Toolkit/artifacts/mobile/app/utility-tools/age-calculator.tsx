@@ -46,7 +46,7 @@ export default function AgeCalculatorScreen() {
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showYearPicker,  setShowYearPicker]  = useState(false);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   // Dynamic day count: if month+year are known use real calendar days,

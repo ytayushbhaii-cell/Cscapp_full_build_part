@@ -11,6 +11,8 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import { ID_CARD_TOOLS, ID_CARD_COLOR } from '@/lib/features/id-card/tools';
 import { getAllIDCards } from '@/lib/features/id-card/db';
 import type { SavedIDCard } from '@/lib/features/id-card/types';
@@ -73,7 +75,9 @@ export default function IDCardHomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
-  const topPad = Platform.OS === 'web' ? 24 : insets.top;
+  const { language } = useSettings();
+  const t = useT();
+  const topPad = Platform.OS === 'web' ? 30 : insets.top;
   const botPad = Platform.OS === 'web' ? 24 : insets.bottom;
 
   const [savedCards, setSavedCards] = useState<SavedIDCard[]>([]);
@@ -96,7 +100,7 @@ export default function IDCardHomeScreen() {
         </View>
         <View style={styles.headerText}>
           <Text style={[styles.headerTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-            ID Card Generator
+            {t('idcard.title')}
           </Text>
           <Text style={[styles.headerSub, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
             100% Offline • Professional Quality

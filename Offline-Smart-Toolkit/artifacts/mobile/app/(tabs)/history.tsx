@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useDrawer } from '@/context/DrawerContext';
+import { useT } from '@/lib/i18n';
 import {
   getAllHistory, clearHistory, deleteHistoryEntry,
   type ToolHistoryEntry,
@@ -95,11 +96,12 @@ export default function HistoryScreen() {
   const { isDark }    = useTheme();
   const { openDrawer } = useDrawer();
   const router  = useRouter();
+  const t = useT();
 
   const [entries,  setEntries]  = useState<ToolHistoryEntry[]>([]);
   const [loading,  setLoading]  = useState(true);
 
-  const topPadding    = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const load = useCallback(async () => {
@@ -121,12 +123,12 @@ export default function HistoryScreen() {
 
   const handleClearAll = useCallback(() => {
     Alert.alert(
-      'Clear All History',
-      'This will permanently delete all processing history. Continue?',
+      t('tabs.history.clearTitle'),
+      t('tabs.history.clearDesc'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('action.cancel'), style: 'cancel' },
         {
-          text: 'Clear All', style: 'destructive',
+          text: t('tabs.history.clearConfirm'), style: 'destructive',
           onPress: async () => {
             await Promise.all(
               (['qr', 'barcode', 'signature', 'stamp'] as const).map((c) => clearHistory(c)),
@@ -151,7 +153,7 @@ export default function HistoryScreen() {
           <MaterialCommunityIcons name="menu" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Processing History
+          {t('tabs.history')}
         </Text>
         {entries.length > 0 && (
           <View style={[styles.badge, { backgroundColor: TOOL_COLOR + '18' }]}>
@@ -191,7 +193,7 @@ export default function HistoryScreen() {
               <MaterialCommunityIcons name="history" size={44} color={TOOL_COLOR} />
             </View>
             <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-              {loading ? 'Loading…' : 'No History Yet'}
+              {loading ? t('app.loading') : t('tabs.history.empty')}
             </Text>
             <Text style={[styles.emptyDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
               {loading

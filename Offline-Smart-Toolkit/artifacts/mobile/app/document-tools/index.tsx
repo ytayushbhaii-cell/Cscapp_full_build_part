@@ -10,6 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import {
   AADHAAR_TOOLS, AADHAAR_COLOR,
   PAN_TOOLS, PAN_COLOR,
@@ -46,13 +48,25 @@ export default function DocumentToolsHome() {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
   const [query, setQuery] = useState('');
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
+  const docDisplayName = (item: DocToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const docDisplayDesc = (item: DocToolMeta) => language === 'hi' ? item.descHi : item.description;
+  const catDisplayName = (cat: CategoryCard) => {
+    if (language !== 'hi') return cat.name;
+    const hiMap: Record<string, string> = {
+      aadhaar: 'आधार टूल्स', pan: 'PAN टूल्स', voter: 'वोटर ID',
+      dl: 'ड्राइविंग लाइसेंस', passport: 'पासपोर्ट', pdf: 'PDF टूल्स',
+    };
+    return hiMap[cat.id] ?? cat.name;
+  };
   const filtered = query
-    ? ALL_DOC_TOOLS.filter((t) => t.name.toLowerCase().includes(query.toLowerCase()))
+    ? ALL_DOC_TOOLS.filter((item) => docDisplayName(item).toLowerCase().includes(query.toLowerCase()))
     : null;
 
   const renderSearchResult = ({ item }: { item: DocToolMeta }) => {
@@ -67,8 +81,8 @@ export default function DocumentToolsHome() {
           <MaterialCommunityIcons name={item.iconName as any} size={22} color={item.color} />
         </View>
         <View style={styles.toolInfo}>
-          <Text style={[styles.toolName, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{item.name}</Text>
-          <Text style={[styles.toolDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={1}>{item.description}</Text>
+          <Text style={[styles.toolName, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{docDisplayName(item)}</Text>
+          <Text style={[styles.toolDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={1}>{docDisplayDesc(item)}</Text>
         </View>
         <TouchableOpacity onPress={() => toggleFavorite(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name={isFav ? 'heart' : 'heart-outline'} size={18} color={isFav ? '#EF4444' : colors.mutedForeground} />
@@ -86,7 +100,7 @@ export default function DocumentToolsHome() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Document & ID Tools</Text>
+        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{t('docs.title')}</Text>
         <View style={[styles.countBadge, { backgroundColor: '#3B82F6' + '18' }]}>
           <Text style={[styles.countText, { color: '#3B82F6', fontFamily: 'Inter_600SemiBold' }]}>{ALL_DOC_TOOLS.length} Tools</Text>
         </View>
@@ -97,7 +111,7 @@ export default function DocumentToolsHome() {
         <Feather name="search" size={16} color={colors.mutedForeground} />
         <TextInput
           style={[styles.searchInput, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}
-          placeholder="Search document tools..."
+          placeholder={t('docs.searchPlaceholder')}
           placeholderTextColor={colors.mutedForeground}
           value={query}
           onChangeText={setQuery}
@@ -145,14 +159,14 @@ export default function DocumentToolsHome() {
                   <MaterialCommunityIcons name={item.iconName as any} size={28} color={item.color} />
                 </View>
                 <View style={styles.catInfo}>
-                  <Text style={[styles.catName, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{item.name}</Text>
+                  <Text style={[styles.catName, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{catDisplayName(item)}</Text>
                   <Text style={[styles.catCount, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
                     {item.tools.length} tools
                   </Text>
                   <View style={styles.toolTags}>
                     {item.tools.slice(0, 3).map((t) => (
                       <View key={t.id} style={[styles.tag, { backgroundColor: item.color + '14', borderRadius: 4 }]}>
-                        <Text style={[styles.tagText, { color: item.color, fontFamily: 'Inter_400Regular' }]} numberOfLines={1}>{t.name}</Text>
+                        <Text style={[styles.tagText, { color: item.color, fontFamily: 'Inter_400Regular' }]} numberOfLines={1}>{docDisplayName(t)}</Text>
                       </View>
                     ))}
                     {item.tools.length > 3 && (

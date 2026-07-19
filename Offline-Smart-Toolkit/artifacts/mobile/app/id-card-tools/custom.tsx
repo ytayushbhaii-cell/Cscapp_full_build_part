@@ -29,7 +29,7 @@ export default function CustomIDScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
-  const topPad = Platform.OS === 'web' ? 24 : insets.top;
+  const topPad = Platform.OS === 'web' ? 30 : insets.top;
   const botPad = Platform.OS === 'web' ? 24 : insets.bottom;
 
   const [data, setData] = useState<CustomIDData>({ ...DEFAULT_CUSTOM, fields: DEFAULT_CUSTOM.fields.map(f => ({ ...f })) });

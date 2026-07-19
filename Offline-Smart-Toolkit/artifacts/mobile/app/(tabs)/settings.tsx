@@ -11,6 +11,7 @@ import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 
 const APP_VERSION = '1.0.0';
 
@@ -76,8 +77,9 @@ export default function SettingsScreen() {
   const { openDrawer } = useDrawer();
   const { language, printSize, defaultFolder } = useSettings();
   const router   = useRouter();
+  const t = useT();
 
-  const topPadding    = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -90,7 +92,7 @@ export default function SettingsScreen() {
           <MaterialCommunityIcons name="menu" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Settings
+          {t('settings.title')}
         </Text>
       </View>
 
@@ -104,19 +106,19 @@ export default function SettingsScreen() {
             <MaterialCommunityIcons name="tools" size={28} color="#fff" />
           </View>
           <View>
-            <Text style={[styles.appInfoName, { fontFamily: 'Inter_700Bold' }]}>CSC Smart Toolkit</Text>
-            <Text style={[styles.appInfoSub, { fontFamily: 'Inter_400Regular' }]}>v{APP_VERSION} • 100% Offline</Text>
+            <Text style={[styles.appInfoName, { fontFamily: 'Inter_700Bold' }]}>{t('app.name')}</Text>
+            <Text style={[styles.appInfoSub, { fontFamily: 'Inter_400Regular' }]}>v{APP_VERSION} • {t('settings.offline')}</Text>
           </View>
         </View>
 
         {/* Appearance */}
         <Text style={[styles.sectionHeader, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>
-          APPEARANCE
+          {t('settings.sectionAppearance')}
         </Text>
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <SettingRow
             icon="weather-night"
-            label="Dark Mode"
+            label={t('settings.darkMode')}
             isSwitch
             switchValue={isDark}
             onToggle={toggleTheme}
@@ -124,8 +126,8 @@ export default function SettingsScreen() {
           <SettingRow
             icon="palette-outline"
             iconColor="#6366F1"
-            label="Theme Settings"
-            value={isDark ? 'Dark' : 'Light'}
+            label={t('settings.themeSettings')}
+            value={isDark ? t('settings.dark') : t('settings.light')}
             onPress={() => router.push('/settings/theme')}
             isLast
           />
@@ -133,27 +135,27 @@ export default function SettingsScreen() {
 
         {/* Preferences */}
         <Text style={[styles.sectionHeader, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>
-          PREFERENCES
+          {t('settings.sectionPreferences')}
         </Text>
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <SettingRow
             icon="translate"
             iconColor="#F59E0B"
-            label="Language"
+            label={t('settings.language')}
             value={LANG_LABELS[language] ?? 'English'}
             onPress={() => router.push('/settings/language')}
           />
           <SettingRow
             icon="printer-outline"
             iconColor="#EF4444"
-            label="Default Print Size"
+            label={t('settings.printSize')}
             value={SIZE_LABELS[printSize] ?? 'A4'}
             onPress={() => router.push('/settings/print-size')}
           />
           <SettingRow
             icon="folder-outline"
             iconColor="#10B981"
-            label="Default Folder"
+            label={t('settings.defaultFolder')}
             value={FOLDER_LABELS[defaultFolder] ?? 'Downloads'}
             onPress={() => router.push('/settings/default-folder')}
             isLast
@@ -162,13 +164,13 @@ export default function SettingsScreen() {
 
         {/* Backup */}
         <Text style={[styles.sectionHeader, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>
-          BACKUP
+          {t('settings.sectionBackup')}
         </Text>
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
           <SettingRow
             icon="backup-restore"
             iconColor="#8B5CF6"
-            label="Backup & Restore"
+            label={t('settings.backup')}
             onPress={() => router.push('/settings/backup')}
             isLast
           />
@@ -176,22 +178,22 @@ export default function SettingsScreen() {
 
         {/* About */}
         <Text style={[styles.sectionHeader, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>
-          ABOUT
+          {t('settings.sectionAbout')}
         </Text>
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius }]}>
-          <SettingRow icon="information-outline" label="App Version" value={APP_VERSION} />
+          <SettingRow icon="information-outline" label={t('settings.appVersion')} value={APP_VERSION} />
           <SettingRow
             icon="shield-check-outline"
             iconColor="#10B981"
-            label="Privacy Policy"
+            label={t('settings.privacyPolicy')}
             onPress={() => {}}
-            value="No data collected"
+            value={t('settings.noData')}
           />
           <SettingRow
             icon="wifi-off"
             iconColor="#3B82F6"
-            label="Offline Mode"
-            value="Always On"
+            label={t('settings.offlineMode')}
+            value={t('settings.alwaysOn')}
             isLast
           />
         </View>

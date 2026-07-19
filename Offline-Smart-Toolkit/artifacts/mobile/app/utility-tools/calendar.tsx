@@ -30,7 +30,7 @@ export default function CalendarScreen() {
   const [year,  setYear]  = useState(todayInfo.year);
   const [month, setMonth] = useState(todayInfo.month);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   useFocusEffect(

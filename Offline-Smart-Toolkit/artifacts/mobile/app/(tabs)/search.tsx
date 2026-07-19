@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp, type Tool } from '@/context/AppContext';
+import { useT } from '@/lib/i18n';
 import {
   getSearchHistory, addSearchHistory,
   removeSearchHistoryItem, clearSearchHistory,
@@ -56,11 +57,12 @@ export default function SearchScreen() {
   const { tools, categories, recordUsage } = useApp();
   const router  = useRouter();
   const inputRef = useRef<TextInput>(null);
+  const t = useT();
 
   const [query,   setQuery]   = useState('');
   const [history, setHistory] = useState<string[]>([]);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   useEffect(() => {
@@ -155,7 +157,7 @@ export default function SearchScreen() {
           <TextInput
             ref={inputRef}
             style={[styles.searchInput, { color: colors.foreground, fontFamily: 'Inter_400Regular' }]}
-            placeholder="Search tools, categories..."
+            placeholder={t('search.placeholder')}
             placeholderTextColor={colors.mutedForeground}
             value={query}
             onChangeText={setQuery}
@@ -196,10 +198,10 @@ export default function SearchScreen() {
               <View style={styles.emptyState}>
                 <MaterialCommunityIcons name="magnify-close" size={52} color={colors.mutedForeground} />
                 <Text style={[styles.emptyTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>
-                  No results found
+                  {t('search.noResults')}
                 </Text>
                 <Text style={[styles.emptyDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-                  Try different keywords or browse categories from the Tools tab.
+                  {t('search.noResultsDesc')}
                 </Text>
               </View>
             )}

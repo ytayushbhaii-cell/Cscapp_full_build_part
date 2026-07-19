@@ -10,7 +10,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
-import { SIGNATURE_TOOLS, STAMP_TOOLS, SIG_COLOR, STAMP_COLOR } from '@/lib/features/signature/tools';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
+import { SIGNATURE_TOOLS, STAMP_TOOLS, SIG_COLOR, STAMP_COLOR, type SigToolMeta } from '@/lib/features/signature/tools';
 
 const SECTIONS = [
   {
@@ -39,8 +41,12 @@ export default function SignatureToolsHome() {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
+  const dn = (item: SigToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const dd = (item: SigToolMeta) => language === 'hi' ? item.descHi : item.description;
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -51,7 +57,7 @@ export default function SignatureToolsHome() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Signature & Stamp</Text>
+        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{t('sig.title')}</Text>
         <View style={[styles.badge, { backgroundColor: SIG_COLOR + '18' }]}>
           <Text style={[styles.badgeText, { color: SIG_COLOR, fontFamily: 'Inter_600SemiBold' }]}>
             {SIGNATURE_TOOLS.length + STAMP_TOOLS.length} Tools
@@ -93,9 +99,9 @@ export default function SignatureToolsHome() {
                     <MaterialCommunityIcons name={tool.iconName as any} size={26} color={tool.color} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.toolName, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{tool.name}</Text>
+                    <Text style={[styles.toolName, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]}>{dn(tool)}</Text>
                     <Text style={[styles.toolDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={2}>
-                      {tool.description}
+                      {dd(tool)}
                     </Text>
                   </View>
                   <TouchableOpacity onPress={() => toggleFavorite(tool.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>

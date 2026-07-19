@@ -38,7 +38,7 @@ export default function BarcodeGeneratorScreen() {
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const [format, setFormat] = useState<BarcodeFormat>('CODE128');

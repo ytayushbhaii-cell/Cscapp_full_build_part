@@ -74,7 +74,7 @@ export default function PercentageCalculatorScreen() {
   // For "% of number" sub-mode: add or subtract
   const [gstMode, setGstMode] = useState<'of' | 'add' | 'sub'>('of');
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   useFocusEffect(

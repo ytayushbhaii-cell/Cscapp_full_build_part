@@ -10,6 +10,7 @@ import { useRouter } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import type { LanguageValue } from '@/lib/features/settings/SettingsService';
 
 const TOOL_COLOR = '#F59E0B';
@@ -49,11 +50,12 @@ export default function LanguageSettingsScreen() {
   const { isDark } = useTheme();
   const { language, setLanguage } = useSettings();
 
+  const t = useT();
   const [selected, setSelected] = useState<LanguageValue>(language);
   const [saved,    setSaved]    = useState(false);
   const [busy,     setBusy]     = useState(false);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const handleSave = async () => {
@@ -85,7 +87,7 @@ export default function LanguageSettingsScreen() {
           <MaterialCommunityIcons name="translate" size={18} color={TOOL_COLOR} />
         </View>
         <Text style={[styles.headerTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Language
+          {t('settings.language')}
         </Text>
       </View>
 
@@ -96,14 +98,14 @@ export default function LanguageSettingsScreen() {
         {/* Hero */}
         <View style={[styles.hero, { backgroundColor: TOOL_COLOR, borderRadius: colors.radius }]}>
           <MaterialCommunityIcons name="translate" size={34} color="#FFFFFF" />
-          <Text style={[styles.heroTitle, { fontFamily: 'Inter_700Bold' }]}>App Language</Text>
+          <Text style={[styles.heroTitle, { fontFamily: 'Inter_700Bold' }]}>{t('lang.heroTitle')}</Text>
           <Text style={[styles.heroSub, { fontFamily: 'Inter_400Regular' }]}>
-            Choose the language for the app interface
+            {t('lang.heroSub')}
           </Text>
         </View>
 
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>
-          SELECT LANGUAGE
+          {t('lang.selectLabel')}
         </Text>
 
         {LANGUAGES.map((lang) => {
@@ -170,7 +172,7 @@ export default function LanguageSettingsScreen() {
           <View style={[styles.successBanner, { backgroundColor: '#10B981' + '18', borderRadius: colors.radius }]}>
             <MaterialCommunityIcons name="check-circle-outline" size={18} color="#10B981" />
             <Text style={[styles.successText, { color: '#10B981', fontFamily: 'Inter_600SemiBold' }]}>
-              Language saved successfully!
+              {t('lang.saved')}
             </Text>
           </View>
         )}
@@ -182,7 +184,7 @@ export default function LanguageSettingsScreen() {
             onPress={handleReset}
           >
             <MaterialCommunityIcons name="refresh" size={17} color={colors.mutedForeground} />
-            <Text style={[styles.resetText, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>Reset</Text>
+            <Text style={[styles.resetText, { color: colors.mutedForeground, fontFamily: 'Inter_600SemiBold' }]}>{t('action.reset')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.saveBtn, { backgroundColor: TOOL_COLOR, borderRadius: colors.radius, opacity: busy ? 0.7 : 1 }]}
@@ -191,7 +193,7 @@ export default function LanguageSettingsScreen() {
           >
             <MaterialCommunityIcons name="content-save-outline" size={17} color="#FFF" />
             <Text style={[styles.saveBtnText, { fontFamily: 'Inter_700Bold' }]}>
-              {busy ? 'Saving…' : 'Save Language'}
+              {busy ? t('lang.saving') : t('lang.saveBtn')}
             </Text>
           </TouchableOpacity>
         </View>

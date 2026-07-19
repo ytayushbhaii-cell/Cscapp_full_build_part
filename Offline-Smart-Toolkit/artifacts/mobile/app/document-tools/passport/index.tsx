@@ -7,6 +7,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import { PASSPORT_TOOLS } from '@/lib/features/documents/tools';
 import type { DocToolMeta } from '@/lib/features/documents/types';
 
@@ -16,10 +18,14 @@ export default function PassportToolsHome() {
   const colors = useColors(); const router = useRouter();
   const insets = useSafeAreaInsets(); const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
   const [query, setQuery] = useState('');
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
-  const filtered = PASSPORT_TOOLS.filter(t => t.name.toLowerCase().includes(query.toLowerCase()));
+  const dn = (item: DocToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const dd = (item: DocToolMeta) => language === 'hi' ? item.descHi : item.description;
+  const filtered = PASSPORT_TOOLS.filter(item => dn(item).toLowerCase().includes(query.toLowerCase()));
 
   const renderTool = ({ item }: { item: DocToolMeta }) => {
     const isFav = favoriteIds.includes(item.id);
@@ -33,8 +39,8 @@ export default function PassportToolsHome() {
             <MaterialCommunityIcons name={isFav ? 'heart' : 'heart-outline'} size={18} color={isFav ? '#EF4444' : colors.mutedForeground} />
           </TouchableOpacity>
         </View>
-        <Text style={[styles.cardTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]} numberOfLines={2}>{item.name}</Text>
-        <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={2}>{item.description}</Text>
+        <Text style={[styles.cardTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]} numberOfLines={2}>{dn(item)}</Text>
+        <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={2}>{dd(item)}</Text>
       </TouchableOpacity>
     );
   };
@@ -46,7 +52,7 @@ export default function PassportToolsHome() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>Passport Tools</Text>
+        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{t('category.passportTools')}</Text>
         <View style={[styles.badge, { backgroundColor: COLOR + '18' }]}>
           <Text style={[styles.badgeText, { color: COLOR, fontFamily: 'Inter_600SemiBold' }]}>{PASSPORT_TOOLS.length} Tools</Text>
         </View>

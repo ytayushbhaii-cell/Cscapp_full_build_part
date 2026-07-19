@@ -10,7 +10,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
-import { QR_TOOLS, BARCODE_TOOLS, QR_COLOR, BARCODE_COLOR } from '@/lib/features/qr/tools';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
+import { QR_TOOLS, BARCODE_TOOLS, QR_COLOR, BARCODE_COLOR, type QRToolMeta } from '@/lib/features/qr/tools';
 
 const SECTIONS = [
   {
@@ -39,8 +41,12 @@ export default function QRToolsHome() {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
+  const dn = (item: QRToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const dd = (item: QRToolMeta) => language === 'hi' ? item.descHi : item.description;
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -52,7 +58,7 @@ export default function QRToolsHome() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
           <MaterialCommunityIcons name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>QR & Barcode Tools</Text>
+        <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>{t('qr.title')}</Text>
         <View style={[styles.badge, { backgroundColor: QR_COLOR + '18' }]}>
           <Text style={[styles.badgeText, { color: QR_COLOR, fontFamily: 'Inter_600SemiBold' }]}>
             {QR_TOOLS.length + BARCODE_TOOLS.length} Tools
@@ -106,10 +112,10 @@ export default function QRToolsHome() {
                       </TouchableOpacity>
                     </View>
                     <Text style={[styles.toolName, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]} numberOfLines={2}>
-                      {tool.name}
+                      {dn(tool)}
                     </Text>
                     <Text style={[styles.toolDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={2}>
-                      {tool.description}
+                      {dd(tool)}
                     </Text>
                     <View style={[styles.toolBtn, { backgroundColor: tool.color + '14', borderRadius: colors.radius - 4 }]}>
                       <Text style={[styles.toolBtnText, { color: tool.color, fontFamily: 'Inter_600SemiBold' }]}>Open →</Text>

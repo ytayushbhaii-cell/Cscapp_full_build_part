@@ -41,7 +41,7 @@ export default function ThemeSettingsScreen() {
   const [saved, setSaved] = useState(false);
   const [busy, setBusy]   = useState(false);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   const handleSave = async () => {

@@ -16,6 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import { UTILITY_TOOLS, UTILITY_COLOR, type UtilityToolMeta } from '@/lib/features/utilities/tools';
 import { initUtilitiesDb, getRecentUsage, type UtilityUsageEntry } from '@/lib/features/utilities/db';
 
@@ -31,10 +33,14 @@ export default function UtilityToolsHome() {
   const insets  = useSafeAreaInsets();
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
+  const dn = (item: UtilityToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const dd = (item: UtilityToolMeta) => language === 'hi' ? item.descHi : item.description;
   const [query,  setQuery]  = useState('');
   const [recent, setRecent] = useState<UtilityUsageEntry[]>([]);
 
-  const topPadding    = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding    = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   useFocusEffect(
@@ -47,9 +53,9 @@ export default function UtilityToolsHome() {
   );
 
   const filtered = UTILITY_TOOLS.filter(
-    (t) =>
-      t.name.toLowerCase().includes(query.toLowerCase()) ||
-      t.description.toLowerCase().includes(query.toLowerCase()),
+    (item) =>
+      dn(item).toLowerCase().includes(query.toLowerCase()) ||
+      dd(item).toLowerCase().includes(query.toLowerCase()),
   );
 
   const renderTool = ({ item }: { item: UtilityToolMeta }) => {
@@ -82,10 +88,10 @@ export default function UtilityToolsHome() {
           </TouchableOpacity>
         </View>
         <Text style={[styles.cardTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          {item.name}
+          {dn(item)}
         </Text>
         <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]}>
-          {item.description}
+          {dd(item)}
         </Text>
         <View style={[styles.cardFooter, { borderTopColor: colors.border }]}>
           <MaterialCommunityIcons name="wifi-off" size={13} color={colors.mutedForeground} />

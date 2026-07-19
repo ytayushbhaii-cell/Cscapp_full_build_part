@@ -16,6 +16,7 @@ import { useColors } from '@/hooks/useColors';
 import { useDrawer } from '@/context/DrawerContext';
 import { useApp } from '@/context/AppContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useT } from '@/lib/i18n';
 
 // Categories with real destination screens
 const CATEGORY_ROUTES: Record<string, string> = {
@@ -43,8 +44,9 @@ export default function ToolsScreen() {
   const { categories } = useApp();
   const { isDark } = useTheme();
   const router = useRouter();
+  const t = useT();
 
-  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -68,11 +70,11 @@ export default function ToolsScreen() {
         <Text
           style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}
         >
-          Tools
+          {t('tools.allTools')}
         </Text>
         <View style={[styles.countBadge, { backgroundColor: colors.primary + '18' }]}>
           <Text style={[styles.countText, { color: colors.primary, fontFamily: 'Inter_600SemiBold' }]}>
-            {categories.length} Categories
+            {categories.length} {t('tools.categories')}
           </Text>
         </View>
       </View>

@@ -15,6 +15,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useColors } from '@/hooks/useColors';
 import { useTheme } from '@/context/ThemeContext';
 import { useApp } from '@/context/AppContext';
+import { useSettings } from '@/context/SettingsContext';
+import { useT } from '@/lib/i18n';
 import { PHOTO_TOOLS, type PhotoToolMeta } from '@/lib/photoTools/tools';
 import { getRecentFiles, type PhotoRecentFile } from '@/lib/photoTools/db';
 
@@ -24,10 +26,12 @@ export default function PhotoToolsHome() {
   const insets = useSafeAreaInsets();
   const { isDark } = useTheme();
   const { favoriteIds, toggleFavorite } = useApp();
+  const { language } = useSettings();
+  const t = useT();
   const [query, setQuery] = useState('');
   const [recent, setRecent] = useState<PhotoRecentFile[]>([]);
 
-  const topPadding = Platform.OS === 'web' ? 24 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   useFocusEffect(
@@ -36,8 +40,10 @@ export default function PhotoToolsHome() {
     }, [])
   );
 
-  const filtered = PHOTO_TOOLS.filter((t) => t.name.toLowerCase().includes(query.toLowerCase()));
-  const favoriteTools = PHOTO_TOOLS.filter((t) => favoriteIds.includes(t.id));
+  const displayName = (item: PhotoToolMeta) => language === 'hi' ? item.nameHi : item.name;
+  const displayDesc = (item: PhotoToolMeta) => language === 'hi' ? item.descHi : item.description;
+  const filtered = PHOTO_TOOLS.filter((item) => displayName(item).toLowerCase().includes(query.toLowerCase()));
+  const favoriteTools = PHOTO_TOOLS.filter((item) => favoriteIds.includes(item.id));
 
   const renderTool = ({ item }: { item: PhotoToolMeta }) => {
     const isFav = favoriteIds.includes(item.id);
@@ -63,10 +69,10 @@ export default function PhotoToolsHome() {
           </TouchableOpacity>
         </View>
         <Text style={[styles.cardTitle, { color: colors.foreground, fontFamily: 'Inter_600SemiBold' }]} numberOfLines={2}>
-          {item.name}
+          {displayName(item)}
         </Text>
         <Text style={[styles.cardDesc, { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' }]} numberOfLines={2}>
-          {item.description}
+          {displayDesc(item)}
         </Text>
       </TouchableOpacity>
     );

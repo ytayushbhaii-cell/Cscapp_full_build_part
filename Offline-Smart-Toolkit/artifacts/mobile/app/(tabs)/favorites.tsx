@@ -16,6 +16,7 @@ import { useColors } from '@/hooks/useColors';
 import { useDrawer } from '@/context/DrawerContext';
 import { useApp, type Tool } from '@/context/AppContext';
 import { useTheme } from '@/context/ThemeContext';
+import { useT } from '@/lib/i18n';
 
 function FavCard({ item, colors, onUnfavorite, onOpen }: {
   item: Tool;
@@ -74,9 +75,10 @@ export default function FavoritesScreen() {
   const { favoriteIds, tools, toggleFavorite } = useApp();
   const { isDark } = useTheme();
   const router = useRouter();
+  const t = useT();
 
   const favoriteTools = tools.filter((t) => favoriteIds.includes(t.id));
-  const topPadding = Platform.OS === 'web' ? 67 : insets.top;
+  const topPadding = Platform.OS === 'web' ? 30 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
   return (
@@ -98,7 +100,7 @@ export default function FavoritesScreen() {
           <MaterialCommunityIcons name="menu" size={24} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.title, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}>
-          Favorites
+          {t('tabs.favorites')}
         </Text>
         {favoriteTools.length > 0 && (
           <View style={[styles.badge, { backgroundColor: '#EF4444' + '18' }]}>
@@ -133,7 +135,7 @@ export default function FavoritesScreen() {
             <Text
               style={[styles.emptyTitle, { color: colors.foreground, fontFamily: 'Inter_700Bold' }]}
             >
-              No Favorites Yet
+              {t('tabs.favorites.empty')}
             </Text>
             <Text
               style={[
@@ -141,7 +143,7 @@ export default function FavoritesScreen() {
                 { color: colors.mutedForeground, fontFamily: 'Inter_400Regular' },
               ]}
             >
-              Mark tools as favorites to quickly access them from here.
+              {t('tabs.favorites.emptyDesc')}
             </Text>
           </View>
         )}

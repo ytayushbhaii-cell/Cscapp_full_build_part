@@ -1,5 +1,5 @@
 import React, {
-  createContext, useContext, useState, useEffect, useCallback, ReactNode,
+  createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PHOTO_TOOLS } from '@/lib/photoTools/tools';
@@ -10,6 +10,7 @@ import { ALL_ID_CARD_TOOLS, ID_CARD_COLOR } from '@/lib/features/id-card/tools';
 import { PRINT_TOOLS, PRINT_COLOR } from '@/lib/printTools/tools';
 import { UTILITY_TOOLS, UTILITY_COLOR } from '@/lib/features/utilities/tools';
 import { recordToolUsage, getTopTools } from '@/lib/features/usage/UsageService';
+import { useSettings } from '@/context/SettingsContext';
 
 export interface RecentFile {
   id: string;
@@ -22,10 +23,13 @@ export interface RecentFile {
 export interface Tool {
   id: string;
   name: string;
+  nameHi: string;
   category: string;
+  categoryHi: string;
   iconName: string;
   color: string;
   description: string;
+  descHi: string;
   route?: string;
 }
 
@@ -61,49 +65,72 @@ interface AppContextType {
   };
 }
 
-// ─── Tool entries ─────────────────────────────────────────────────────────────
+// ─── Tool entries (bilingual) ──────────────────────────────────────────────────
 
 const PHOTO_TOOL_ENTRIES: Tool[] = PHOTO_TOOLS.map((t) => ({
-  id: t.id, name: t.name, category: 'Photo Tools',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: 'Photo Tools', categoryHi: 'फोटो टूल्स',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
-const DOC_TOOL_ENTRIES: Tool[] = ALL_DOC_TOOLS.map((t) => ({
-  id: t.id, name: t.name,
-  category:
-    t.category === 'aadhaar'         ? 'Aadhaar Tools'
-    : t.category === 'pan'           ? 'PAN Tools'
-    : t.category === 'voter'         ? 'Voter ID Tools'
-    : t.category === 'driving-license' ? 'Driving License Tools'
-    : t.category === 'passport'      ? 'Passport Tools'
-    : 'PDF Tools',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
-}));
+const DOC_TOOL_ENTRIES: Tool[] = ALL_DOC_TOOLS.map((t) => {
+  const [cat, catHi] =
+    t.category === 'aadhaar'           ? ['Aadhaar Tools',          'आधार टूल्स']
+    : t.category === 'pan'             ? ['PAN Tools',               'PAN टूल्स']
+    : t.category === 'voter'           ? ['Voter ID Tools',          'वोटर ID टूल्स']
+    : t.category === 'driving-license' ? ['Driving License Tools',   'ड्राइविंग लाइसेंस टूल्स']
+    : t.category === 'passport'        ? ['Passport Tools',          'पासपोर्ट टूल्स']
+    :                                    ['PDF Tools',                'PDF टूल्स'];
+  return {
+    id: t.id, name: t.name, nameHi: t.nameHi,
+    category: cat, categoryHi: catHi,
+    iconName: t.iconName, color: t.color,
+    description: t.description, descHi: t.descHi,
+    route: t.route,
+  };
+});
 
 const QR_TOOL_ENTRIES: Tool[] = ALL_QR_TOOLS.map((t) => ({
-  id: t.id, name: t.name, category: 'QR & Barcode',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: 'QR & Barcode', categoryHi: 'QR और बारकोड',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
 const SIG_TOOL_ENTRIES: Tool[] = ALL_SIG_TOOLS.map((t) => ({
-  id: t.id, name: t.name,
-  category: t.id.startsWith('stamp') ? 'Stamp Tools' : 'Signature Tools',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: t.id.startsWith('stamp') ? 'Stamp Tools'      : 'Signature Tools',
+  categoryHi: t.id.startsWith('stamp') ? 'स्टैंप टूल्स'  : 'हस्ताक्षर टूल्स',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
 const ID_CARD_TOOL_ENTRIES: Tool[] = ALL_ID_CARD_TOOLS.map((t) => ({
-  id: t.id, name: t.name, category: 'ID Card Generator',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: 'ID Card Generator', categoryHi: 'ID कार्ड जेनरेटर',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
 const PRINT_TOOL_ENTRIES: Tool[] = PRINT_TOOLS.map((t) => ({
-  id: t.id, name: t.name, category: 'Print Tools',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: 'Print Tools', categoryHi: 'प्रिंट टूल्स',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
 const UTILITY_TOOL_ENTRIES: Tool[] = UTILITY_TOOLS.map((t) => ({
-  id: t.id, name: t.name, category: 'Utility Tools',
-  iconName: t.iconName, color: t.color, description: t.description, route: t.route,
+  id: t.id, name: t.name, nameHi: t.nameHi,
+  category: 'Utility Tools', categoryHi: 'उपयोगिता टूल्स',
+  iconName: t.iconName, color: t.color,
+  description: t.description, descHi: t.descHi,
+  route: t.route,
 }));
 
 export const ALL_TOOLS: Tool[] = [
@@ -150,9 +177,21 @@ const AppContext = createContext<AppContextType>({
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { language } = useSettings();
   const [favoriteIds,  setFavoriteIds]  = useState<string[]>([]);
   const [recentFiles,  setRecentFiles]  = useState<RecentFile[]>([]);
   const [topToolIds,   setTopToolIds]   = useState<string[]>([]);
+
+  // Localize tool names/descriptions/categories based on current language
+  const localizedTools = useMemo(() => {
+    if (language !== 'hi') return ALL_TOOLS;
+    return ALL_TOOLS.map((t) => ({
+      ...t,
+      name: t.nameHi || t.name,
+      description: t.descHi || t.description,
+      category: t.categoryHi || t.category,
+    }));
+  }, [language]);
 
   // Load persisted data on mount
   useEffect(() => {
@@ -234,7 +273,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addRecentFile,
         recordUsage,
         refreshTopTools,
-        tools:      ALL_TOOLS,
+        tools:      localizedTools,
         categories: ALL_CATEGORIES,
         stats,
       }}
