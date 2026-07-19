@@ -2,7 +2,20 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 
-const config = getDefaultConfig(__dirname);
+// Monorepo root (two levels up from artifacts/mobile)
+const projectRoot = __dirname;
+const workspaceRoot = path.resolve(projectRoot, '../..');
+
+const config = getDefaultConfig(projectRoot);
+
+// Watch the entire monorepo so Metro can resolve workspace packages
+config.watchFolders = [workspaceRoot];
+
+// Look for modules in both the project and monorepo root node_modules
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
+  path.resolve(workspaceRoot, 'node_modules'),
+];
 
 // Expo's default web resolution prefers the "browser"/"module" package.json
 // field over "main". Several pure-JS deps we rely on (pdf-lib in particular)
@@ -14,34 +27,28 @@ const config = getDefaultConfig(__dirname);
 config.resolver.resolverMainFields = ['react-native', 'main', 'browser', 'module'];
 
 // Belt-and-suspenders fix for pdf-lib: explicitly redirect the module to its
-// CJS build regardless of what the platform resolver chooses. Expo SDK 50+
-// enables package `exports` resolution for web, which can override the field
-// order above and pick the ES build (whose tslib shim has no default export).
-const pdfLibCjsEntry = path.resolve(
-  __dirname,
-  '../../node_modules/.pnpm/pdf-lib@1.17.1/node_modules/pdf-lib/cjs/index.js'
-);
-
+// CJS build regardless of what the platform resolver chooses.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'pdf-lib') {
-    return { filePath: pdfLibCjsEntry, type: 'sourceFile' };
+    // Find pdf-lib CJS entry from wherever pnpm installed it
+    try {
+      const pdfLibPkg = require.resolve('pdf-lib/package.json', {
+        paths: [projectRoot, workspaceRoot],
+      });
+      const pdfLibDir = path.dirname(pdfLibPkg);
+      return { filePath: path.join(pdfLibDir, 'cjs', 'index.js'), type: 'sourceFile' };
+    } catch {
+      // fallback to default resolution
+    }
   }
-  // onnxruntime-web is intentionally NOT imported via Metro.
-  // All ORT JS files contain `import(/*webpackIgnore*/)` dynamic imports
-  // that Metro's transformer rejects. Instead, ortLoader.web.ts loads
-  // ort.min.js via a <script> tag at runtime (public/ort.min.js).
-  // Metro never sees any ORT source, so this resolver override is not needed.
   return context.resolveRequest(context, moduleName, platform);
 };
 
-// Register ONNX model files and WebAssembly binaries as static assets so
-// Metro can serve them. Place BiRefNet / RMBG-2.0 .onnx files under
-// assets/models/ to activate ONNX inference; the app falls back to BodyPix
-// automatically when the files are absent.
+// Register ONNX model files and WebAssembly binaries as static assets
 config.resolver.assetExts = [
   ...(config.resolver.assetExts || []),
-  'onnx',  // ONNX model weights (BiRefNet, RMBG-2.0)
-  'wasm',  // onnxruntime-web WebAssembly binaries
+  'onnx',
+  'wasm',
 ];
 
 module.exports = config;
