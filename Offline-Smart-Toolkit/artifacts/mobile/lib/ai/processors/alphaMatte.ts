@@ -44,8 +44,6 @@ import {
   removeWhiteHalo,
   erodeAlphaEdge,
   removeSpeckles,
-  eliminateSolitaryFringePixels,
-  premultipliedColorClamp,
 } from './haloRemoval';
 import { guidedFilterRGBA } from './guidedFilter';
 import { logAlphaStats } from '../debug/maskDebug';

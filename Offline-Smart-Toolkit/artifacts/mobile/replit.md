@@ -9,6 +9,34 @@ cd Offline-Smart-Toolkit/artifacts/mobile && PORT=5000 EXPO_PUBLIC_PORT=5000 pnp
 ```
 The workflow "Start application" handles this. The app runs at http://localhost:5000 (Expo web).
 
+## Workflow: Expo Prebuild (Bare Workflow) — Android
+
+The project has been migrated to **Expo Prebuild / Bare Workflow**. The `android/` directory is now committed and owned by the project. Do NOT delete it.
+
+### To rebuild native files after app.json plugin changes
+```bash
+cd Offline-Smart-Toolkit/artifacts/mobile
+echo "y" | npx expo prebuild --platform android --clean --no-install
+```
+
+### To build APK (debug) with EAS
+```bash
+eas build --platform android --profile preview
+```
+
+### To build AAB (production / Play Store)
+```bash
+eas build --platform android --profile production
+```
+> Requires: `eas-cli` installed (`npm i -g eas-cli`) and an Expo account logged in.
+> Production builds use `buildType: "app-bundle"` (AAB) for Play Store.
+
+### To run on a connected Android device (requires local Android SDK)
+```bash
+cd Offline-Smart-Toolkit/artifacts/mobile
+pnpm android   # runs expo run:android
+```
+
 ## Stack
 - **Framework**: Expo SDK 54 + React Native 0.81 (web via Metro bundler)
 - **Navigation**: Expo Router v6 (file-based routing)
@@ -99,6 +127,17 @@ The background remover uses BiRefNet ONNX (`public/models/birefnet-q.onnx`) with
 9. **Composite** — Transparent PNG output at original resolution
 
 Key files: `lib/ai/services/onnxBackend.ts`, `lib/ai/services/SegmentationService.ts`, `lib/ai/processors/`
+
+## AI Model Status (Native Android)
+
+| Model | Web (Expo Web) | Native Android |
+|-------|---------------|----------------|
+| BiRefNet (ONNX) | ✅ Full inference via onnxruntime-web | ⚠️ Falls back to TF.js BodyPix (CPU) |
+| RMBG-2.0 (ONNX) | ✅ Full inference via onnxruntime-web | ⚠️ Falls back to TF.js BodyPix (CPU) |
+| U2Net (ONNX) | ✅ Full inference via onnxruntime-web | ⚠️ Falls back to TF.js BodyPix (CPU) |
+
+**Why**: `onnxruntime-web` uses WebAssembly (unsupported by Hermes JS engine on Android).
+**Path to fix**: Replace `ortLoader.native.ts` stub with `onnxruntime-react-native` InferenceSession — infrastructure already wired in `ModelDownloadService.native.ts`.
 
 ## Key Packages (mobile)
 - `pdf-lib` — PDF creation/manipulation (CJS build forced via metro config)

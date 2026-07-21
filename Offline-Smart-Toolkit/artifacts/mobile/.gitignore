@@ -4,3 +4,17 @@
 
 expo-env.d.ts
 # @end expo-cli
+
+# Expo local state (device history, dev server settings)
+.expo/
+
+# Android build outputs
+android/build/
+android/app/build/
+android/.gradle/
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
