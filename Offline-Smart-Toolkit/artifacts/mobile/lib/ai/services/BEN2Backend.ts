@@ -37,7 +37,10 @@ import { guidedFilterRGBA } from '../processors/guidedFilter';
 
 // ─── Model config ─────────────────────────────────────────────────────────────
 
-const BEN2_PUBLIC_PATH  = '/models/ben2.onnx';
+// On native, EXPO_PUBLIC_BEN2_MODEL_URL must be set to an HTTPS URL before EAS build.
+// On web, the relative path is served from the public/ folder.
+const BEN2_PUBLIC_PATH  =
+  (process.env as any).EXPO_PUBLIC_BEN2_MODEL_URL?.trim() || '/models/ben2.onnx';
 const BEN2_INPUT_SIZE   = 1024;
 const BEN2_MIN_BYTES    = 50_000_000; // 50 MB minimum to be considered valid
 const BEN2_MODEL_ID     = 'ben2';

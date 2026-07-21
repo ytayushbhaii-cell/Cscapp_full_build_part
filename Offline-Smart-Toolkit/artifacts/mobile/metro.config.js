@@ -1,6 +1,7 @@
 // Learn more https://docs.expo.dev/guides/monorepos
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
+const fs   = require('fs');
 
 // Monorepo root (two levels up from artifacts/mobile)
 const projectRoot = __dirname;
@@ -8,15 +9,24 @@ const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch the entire monorepo so Metro can resolve workspace packages
-// Merge with Expo defaults so expo-doctor's watchFolders check passes
-config.watchFolders = [...(config.watchFolders ?? []), workspaceRoot];
+// Watch the entire monorepo so Metro can resolve workspace packages.
+// Guard: only add directories that actually exist — Metro's FSWatcher throws
+// ENOENT if the path is missing, crashing the dev server on first start.
+function safeWatchFolder(dir) {
+  try { return fs.existsSync(dir); } catch { return false; }
+}
+config.watchFolders = [
+  ...(config.watchFolders ?? []),
+  ...(safeWatchFolder(workspaceRoot) ? [workspaceRoot] : []),
+];
 
-// Look for modules in both the project and monorepo root node_modules
-config.resolver.nodeModulesPaths = [
+// Look for modules in both the project and monorepo root node_modules.
+// Only include paths that actually exist to avoid resolver warnings.
+const candidateNodeModules = [
   path.resolve(projectRoot, 'node_modules'),
   path.resolve(workspaceRoot, 'node_modules'),
 ];
+config.resolver.nodeModulesPaths = candidateNodeModules.filter(fs.existsSync);
 
 // Expo's default web resolution prefers the "browser"/"module" package.json
 // field over "main". Several pure-JS deps we rely on (pdf-lib in particular)

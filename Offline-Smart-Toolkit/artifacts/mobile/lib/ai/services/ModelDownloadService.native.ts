@@ -194,3 +194,19 @@ class NativeModelDownloadService implements IModelDownloadService {
 }
 
 export const modelDownloadService: IModelDownloadService = new NativeModelDownloadService();
+
+// Re-export shared error classes so Metro-resolved imports (e.g. ModelDownloadGate)
+// can destructure ModelDownloadCancelledError / ModelDownloadError from this file
+// on Android without them being undefined at runtime.
+export {
+  ModelDownloadCancelledError,
+  ModelIntegrityError,
+  ModelDownloadError,
+} from './ModelDownloadServiceTypes';
+
+export type {
+  DownloadProgress,
+  DownloadProgressCallback,
+  ModelCacheInfo,
+  IModelDownloadService,
+} from './ModelDownloadServiceTypes';

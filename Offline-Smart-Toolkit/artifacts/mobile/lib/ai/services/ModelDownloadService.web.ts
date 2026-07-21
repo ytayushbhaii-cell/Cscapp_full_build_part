@@ -263,3 +263,18 @@ class WebModelDownloadService implements IModelDownloadService {
 }
 
 export const modelDownloadService: IModelDownloadService = new WebModelDownloadService();
+
+// Re-export shared error classes so Metro-resolved imports can destructure them
+// from this file on web without them being undefined at runtime.
+export {
+  ModelDownloadCancelledError,
+  ModelIntegrityError,
+  ModelDownloadError,
+} from './ModelDownloadServiceTypes';
+
+export type {
+  DownloadProgress,
+  DownloadProgressCallback,
+  ModelCacheInfo,
+  IModelDownloadService,
+} from './ModelDownloadServiceTypes';

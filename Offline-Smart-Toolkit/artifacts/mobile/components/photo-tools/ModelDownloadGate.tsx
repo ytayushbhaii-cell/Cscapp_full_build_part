@@ -50,6 +50,40 @@ interface ModelSpec {
   downloadUrl: string;
 }
 
+// ─── Model URL resolver ───────────────────────────────────────────────────────
+//
+// On Android/iOS the app is a native binary — relative URL paths like
+// '/models/birefnet-q.onnx' are meaningless (no web server running).
+// All model URLs MUST be absolute HTTPS URLs for native platforms.
+//
+// Priority (highest → lowest):
+//   1. EXPO_PUBLIC_<ID>_MODEL_URL environment variable (set before EAS build)
+//   2. Known public default URLs (only available for U2Net-Portrait 4.4 MB)
+//   3. Relative path fallback (web preview only)
+//
+// How to configure before an EAS build:
+//   Set these in your .env / eas.json environment or EAS secrets:
+//     EXPO_PUBLIC_BIREFNET_MODEL_URL   — your BiRefNet .onnx HTTPS URL (~44 MB)
+//     EXPO_PUBLIC_RMBG2_MODEL_URL      — your RMBG-2.0 .onnx HTTPS URL (~90 MB)
+//     EXPO_PUBLIC_U2NET_MODEL_URL      — your U2Net .onnx HTTPS URL (~4.4 MB)
+//     EXPO_PUBLIC_ISNET_MODEL_URL      — your IS-Net .onnx HTTPS URL (~176 MB)
+//     EXPO_PUBLIC_BEN2_MODEL_URL       — your BEN2 .onnx HTTPS URL (~180 MB)
+
+function env(key: string): string | null {
+  const v = (process.env as Record<string, string | undefined>)[key];
+  return v && v.trim().length > 0 ? v.trim() : null;
+}
+
+function resolveModelUrl(envKey: string, publicDefault: string, relativeFallback: string): string {
+  // 1. Env var (works on all platforms — set before EAS build)
+  const fromEnv = env(envKey);
+  if (fromEnv) return fromEnv;
+  // 2. Known public default (absolute HTTPS)
+  if (publicDefault) return publicDefault;
+  // 3. Relative path — web preview only; useless on Android/iOS
+  return relativeFallback;
+}
+
 // These match onnxBackend.ts MODEL_CONFIGS and BEN2Backend.ts.
 // The primary model is tried first; fallback models are downloaded alongside.
 const MODEL_SPECS: Record<string, ModelSpec> = {
@@ -60,35 +94,57 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
     // Actual quantized model file size on disk (birefnet-q.onnx).
     // This must match the real file — ModelDownloadService enforces ±5% integrity check.
     sizeBytes:   44 * 1024 * 1024,
-    downloadUrl: '/models/birefnet-q.onnx',
+    downloadUrl: resolveModelUrl(
+      'EXPO_PUBLIC_BIREFNET_MODEL_URL',
+      '',                          // no universal public default — set env var before build
+      '/models/birefnet-q.onnx',  // relative path works only in web preview
+    ),
   },
   ben2: {
     id:          'ben2',
     name:        'BEN2 (Hair Refinement)',
     description: 'Secondary refinement for hair, fur & complex edges',
     sizeBytes:   180 * 1024 * 1024,
-    downloadUrl: '/models/ben2.onnx',
+    downloadUrl: resolveModelUrl(
+      'EXPO_PUBLIC_BEN2_MODEL_URL',
+      '',
+      '/models/ben2.onnx',
+    ),
   },
   rmbg2: {
     id:          'rmbg2',
     name:        'RMBG-2.0 (Fallback)',
     description: 'High-quality fallback & low-memory mode',
     sizeBytes:   90 * 1024 * 1024,
-    downloadUrl: '/models/rmbg-2.0.onnx',
+    downloadUrl: resolveModelUrl(
+      'EXPO_PUBLIC_RMBG2_MODEL_URL',
+      '',
+      '/models/rmbg-2.0.onnx',
+    ),
   },
   u2net: {
     id:          'u2net',
     name:        'U2Net-Portrait (Compact)',
     description: 'Fast 4.4 MB fallback model',
-    sizeBytes:   4.4 * 1024 * 1024,
-    downloadUrl: '/models/u2netp.onnx',
+    sizeBytes:   4.4 * 1024 * 1024, // rembg u2netp.onnx ~4.4 MB; 5% tolerance in integrity check covers minor variation
+    downloadUrl: resolveModelUrl(
+      'EXPO_PUBLIC_U2NET_MODEL_URL',
+      // Known public URL — available without hosting your own model file.
+      // Source: github.com/danielgatis/rembg (MIT licence)
+      'https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx',
+      '/models/u2netp.onnx',
+    ),
   },
   isnet: {
     id:          'isnet',
     name:        'IS-Net (High-Accuracy)',
     description: 'Best for complex scenes',
     sizeBytes:   176 * 1024 * 1024,
-    downloadUrl: '/models/isnet-general.onnx',
+    downloadUrl: resolveModelUrl(
+      'EXPO_PUBLIC_ISNET_MODEL_URL',
+      '',
+      '/models/isnet-general.onnx',
+    ),
   },
 };
 
