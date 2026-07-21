@@ -49,8 +49,8 @@ let _sessionPromise: Promise<OrtSession | null> | null = null;
 let _ortConfigured = false;
 
 async function getDownloadService() {
-  if (Platform.OS !== 'web') return null;
   try {
+    // Metro resolves .web.ts / .native.ts platform extensions automatically
     const mod = await import('./ModelDownloadService');
     return mod.modelDownloadService;
   } catch {
@@ -69,9 +69,12 @@ async function ensureOrtConfigured(): Promise<any> {
   const ort = await loadOnnxRuntime();
   if (!ort) return null;
   if (!_ortConfigured) {
-    ort.env.wasm.wasmPaths = getWasmDir();
-    if (ort.env.webgpu !== undefined) {
-      try { (ort.env as any).webgpu = { disabled: true }; } catch { /* read-only */ }
+    // Web only: configure WASM paths. Native ORT uses JNI — no WASM setup needed.
+    if (Platform.OS === 'web') {
+      if (ort.env?.wasm) ort.env.wasm.wasmPaths = getWasmDir();
+      if (ort.env?.webgpu !== undefined) {
+        try { (ort.env as any).webgpu = { disabled: true }; } catch { /* read-only */ }
+      }
     }
     _ortConfigured = true;
   }
@@ -79,7 +82,6 @@ async function ensureOrtConfigured(): Promise<any> {
 }
 
 async function loadBEN2Session(): Promise<OrtSession | null> {
-  if (Platform.OS !== 'web') return null;
 
   console.info('[BEN2] Loading BEN2 model…');
   try {
@@ -87,17 +89,24 @@ async function loadBEN2Session(): Promise<OrtSession | null> {
     if (!ort) { console.warn('[BEN2] ORT not available'); return null; }
 
     const sessionOptions = {
-      executionProviders: ['wasm'],
+      executionProviders: Platform.OS === 'web' ? ['wasm'] : ['cpu'],
       graphOptimizationLevel: 'all',
     };
 
-    // ── Try IndexedDB cache first ────────────────────────────────────────────
+    // ── Try device cache first (IndexedDB on web, file system on native) ────
     const svc = await getDownloadService();
     if (svc) {
-      const buffer = await svc.getModelData(BEN2_MODEL_ID) as ArrayBuffer | null;
-      if (buffer && buffer.byteLength >= BEN2_MIN_BYTES) {
-        console.info(`[BEN2] ✅ Loaded from cache (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-        const session = await ort.InferenceSession.create(buffer, sessionOptions);
+      const data = await svc.getModelData(BEN2_MODEL_ID);
+      if (typeof data === 'string') {
+        // Native: file path returned by ModelDownloadService.native.ts
+        console.info('[BEN2] Loading from native file cache…');
+        const session = await ort.InferenceSession.create(data, sessionOptions);
+        console.info(`[BEN2] ✅ Ready — inputs: ${session.inputNames?.join(', ')}`);
+        return session;
+      } else if (data && (data as ArrayBuffer).byteLength >= BEN2_MIN_BYTES) {
+        const buf = data as ArrayBuffer;
+        console.info(`[BEN2] ✅ Loaded from cache (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+        const session = await ort.InferenceSession.create(buf, sessionOptions);
         console.info(`[BEN2] ✅ Ready — inputs: ${session.inputNames?.join(', ')}`);
         return session;
       }
@@ -138,12 +147,12 @@ function getOrLoadBEN2Session(): Promise<OrtSession | null> {
 
 /** Returns true if the BEN2 model is cached and loadable. */
 export async function isBEN2Available(): Promise<boolean> {
-  if (Platform.OS !== 'web') return false;
   try {
     const svc = await getDownloadService();
     if (!svc) return false;
-    const buffer = await svc.getModelData(BEN2_MODEL_ID) as ArrayBuffer | null;
-    return !!(buffer && buffer.byteLength >= BEN2_MIN_BYTES);
+    const data = await svc.getModelData(BEN2_MODEL_ID);
+    if (typeof data === 'string') return data.length > 0; // native file path
+    return !!(data && (data as ArrayBuffer).byteLength >= BEN2_MIN_BYTES);
   } catch {
     return false;
   }
@@ -454,7 +463,6 @@ export async function refineMaskWithBEN2(
 
 /** Warm up BEN2 session in the background (call at app startup). */
 export function warmUpBEN2(): void {
-  if (Platform.OS !== 'web') return;
   getOrLoadBEN2Session().catch(() => {});
 }
 

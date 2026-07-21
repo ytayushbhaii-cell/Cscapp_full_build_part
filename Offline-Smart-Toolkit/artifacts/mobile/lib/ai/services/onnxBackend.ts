@@ -28,9 +28,8 @@ import { modelRegistry } from '../ModelRegistry';
 // ─── Lazy import of download service (web only) ───────────────────────────────
 
 async function getDownloadService() {
-  if (Platform.OS !== 'web') return null; // ONNX on native is task #2
   try {
-    // Import via platform entrypoint — Metro resolves .web.ts / .native.ts automatically
+    // Metro resolves .web.ts / .native.ts platform extensions automatically
     const mod = await import('./ModelDownloadService');
     return mod.modelDownloadService;
   } catch {
@@ -183,9 +182,12 @@ async function ensureOrtConfigured(): Promise<any> {
   const ort = await loadOnnxRuntime();
   if (!ort) return null;
   if (!_ortConfigured) {
-    ort.env.wasm.wasmPaths = getWasmDir();
-    if (ort.env.webgpu !== undefined) {
-      try { (ort.env as any).webgpu = { disabled: true }; } catch { /* read-only */ }
+    // Web only: configure WASM paths. Native ORT uses JNI — no WASM setup needed.
+    if (Platform.OS === 'web') {
+      if (ort.env?.wasm) ort.env.wasm.wasmPaths = getWasmDir();
+      if (ort.env?.webgpu !== undefined) {
+        try { (ort.env as any).webgpu = { disabled: true }; } catch { /* read-only */ }
+      }
     }
     _ortConfigured = true;
   }
@@ -195,7 +197,6 @@ async function ensureOrtConfigured(): Promise<any> {
 // ─── Session loader — cache-first ────────────────────────────────────────────
 
 async function loadModelSession(id: OnnxModelId): Promise<OnnxSession | null> {
-  if (Platform.OS !== 'web') return null;
   const cfg = MODEL_CONFIGS[id];
   if (!cfg) return null;
 
@@ -207,17 +208,25 @@ async function loadModelSession(id: OnnxModelId): Promise<OnnxSession | null> {
     if (!ort) { modelRegistry.setStatus(id, 'ai-unavailable'); return null; }
 
     const sessionOptions = {
-      executionProviders: ['wasm'],
+      executionProviders: Platform.OS === 'web' ? ['wasm'] : ['cpu'],
       graphOptimizationLevel: 'all',
     };
 
-    // ── 1. Try IndexedDB cache first ─────────────────────────────────────────
+    // ── 1. Try device cache first (IndexedDB on web, file system on native) ──
     const svc = await getDownloadService();
     if (svc) {
-      const buffer = await svc.getModelData(id) as ArrayBuffer | null;
-      if (buffer && buffer.byteLength >= cfg.minFileSizeBytes) {
-        console.info(`[ONNX] ✅ ${cfg.name} loaded from device cache (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`);
-        const session = await ort.InferenceSession.create(buffer, sessionOptions);
+      const data = await svc.getModelData(id);
+      if (typeof data === 'string') {
+        // Native: ModelDownloadService returns a file:// URI
+        console.info(`[ONNX] ✅ ${cfg.name} loading from native cache…`);
+        const session = await ort.InferenceSession.create(data, sessionOptions);
+        modelRegistry.setStatus(id, 'ai-cached');
+        console.info(`[ONNX] ✅ ${cfg.name} ready — inputs: ${session.inputNames?.join(', ')}`);
+        return session;
+      } else if (data && (data as ArrayBuffer).byteLength >= cfg.minFileSizeBytes) {
+        const buf = data as ArrayBuffer;
+        console.info(`[ONNX] ✅ ${cfg.name} loaded from device cache (${(buf.byteLength / 1024 / 1024).toFixed(1)} MB)`);
+        const session = await ort.InferenceSession.create(buf, sessionOptions);
         modelRegistry.setStatus(id, 'ai-cached');
         console.info(`[ONNX] ✅ ${cfg.name} ready — inputs: ${session.inputNames?.join(', ')}`);
         return session;
@@ -262,7 +271,6 @@ function getOrLoadSession(id: OnnxModelId): Promise<OnnxSession | null> {
  * Call at app startup to amortise first-inference latency.
  */
 export function warmUpOnnxModels(): void {
-  if (Platform.OS !== 'web') return;
   for (const id of PRIORITY_ORDER) {
     getOrLoadSession(id).catch(() => {});
   }

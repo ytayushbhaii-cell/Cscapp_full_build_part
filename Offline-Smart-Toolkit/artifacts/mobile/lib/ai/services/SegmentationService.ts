@@ -337,32 +337,34 @@ export async function segmentSubject(uri: string, signal?: AbortSignal): Promise
     let alpha: Float32Array;
     let backend: SegmentationResult['backend'];
 
-    if (Platform.OS === 'web') {
-      // Analyze the image and compute routing decision
-      const [analysis, capability, ben2Ready] = await Promise.all([
-        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
-        detectDeviceCapabilities(),
-        isBEN2Available(),
-      ]);
-      checkAbort(signal);
+    // Try ONNX first on all platforms (web + native).
+    // BodyPix is kept as last-resort fallback on native if no models are cached.
+    const [analysis, capability, ben2Ready] = await Promise.all([
+      analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
+      detectDeviceCapabilities(),
+      isBEN2Available(),
+    ]);
+    checkAbort(signal);
 
-      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
-        modelRegistry.get('birefnet')?.status === 'ai-loading';
-      const decision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
+    const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+      modelRegistry.get('birefnet')?.status === 'ai-loading';
+    const decision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
 
-      const result = await onnxAlpha(decoded, analysis, decision, signal);
-      checkAbort(signal);
-      if (!result) {
-        const detail = lastOrtError ? ` (${lastOrtError})` : '';
-        throw new Error(
-          `Segmentation model failed${detail}. Ensure models are downloaded and restart.`,
-        );
-      }
+    const result = await onnxAlpha(decoded, analysis, decision, signal);
+    checkAbort(signal);
+    if (result) {
       alpha   = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
       backend = decision.primaryModel as SegmentationResult['backend'];
-    } else {
+    } else if (Platform.OS !== 'web') {
+      // Native fallback: BodyPix (runs without any model download)
+      console.warn('[Segmentation] ONNX unavailable on native — falling back to BodyPix');
       alpha   = await bodyPixAlpha(decoded);
       backend = 'bodypix';
+    } else {
+      const detail = lastOrtError ? ` (${lastOrtError})` : '';
+      throw new Error(
+        `Segmentation model failed${detail}. Ensure models are downloaded and restart.`,
+      );
     }
 
     checkAbort(signal);
@@ -442,60 +444,70 @@ export async function removeBackgroundPro(
     step('decode', 'done');
     report(10);
 
-    let alpha: Float32Array;
+    let alpha!: Float32Array;
     let modelName = 'BodyPix';
     let routingDecision: RoutingDecision | null = null;
 
-    if (Platform.OS === 'web') {
+    // ── Stage 2: Analyze & route (all platforms) ──────────────────────────
+    step('analyze', 'running');
+    report(13);
 
-      // ── Stage 2: Analyze & route ─────────────────────────────────────────
-      step('analyze', 'running');
-      report(13);
+    const [analysis, capability, ben2Ready] = await Promise.all([
+      analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, effectiveUri),
+      detectDeviceCapabilities(),
+      isBEN2Available(),
+    ]);
 
-      const [analysis, capability, ben2Ready] = await Promise.all([
-        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, effectiveUri),
-        detectDeviceCapabilities(),
-        isBEN2Available(),
-      ]);
+    const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+      modelRegistry.get('birefnet')?.status === 'ai-loading';
 
-      // Check if BiRefNet is available for routing decision
-      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
-        modelRegistry.get('birefnet')?.status === 'ai-loading';
+    routingDecision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
 
-      routingDecision = routeImage(analysis, capability, ben2Ready, birefnetAvailable);
+    console.info(
+      `[Segmentation] Route: ${routingDecision.reason} | ` +
+      `BEN2=${routingDecision.useBEN2} | hd=${hd}`,
+    );
 
-      console.info(
-        `[Segmentation] Route: ${routingDecision.reason} | ` +
-        `BEN2=${routingDecision.useBEN2} | hd=${hd}`,
-      );
+    step('analyze', 'done');
+    report(17);
+    checkAbort(signal);
 
-      step('analyze', 'done');
-      report(17);
-      checkAbort(signal);
+    // ── Stage 3: Detect Subject (ONNX — web + native) ─────────────────────
+    step('detect', 'running');
+    report(20);
 
-      // ── Stage 3: Detect Subject (ONNX inference) ─────────────────────────
-      step('detect', 'running');
-      report(20);
+    const inferenceStart = Date.now();
+    const result = await onnxAlpha(decoded, analysis, routingDecision, signal);
+    checkAbort(signal);
 
-      // Route through onnxAlpha so the routing decision's preferred model order
-      // is actually enforced at inference time (low-RAM → RMBG-2.0 first, etc.)
-      const inferenceStart = Date.now();
-      const result = await onnxAlpha(decoded, analysis, routingDecision, signal);
-      checkAbort(signal);
-
-      if (!result) {
-        step('detect', 'error');
+    if (!result) {
+      step('detect', 'error');
+      if (Platform.OS !== 'web') {
+        // Native fallback: BodyPix (ONNX models not yet downloaded to device)
+        console.warn('[Segmentation] ONNX unavailable on native — using BodyPix fallback');
+        report(18);
+        alpha     = await bodyPixAlpha(decoded, hd);
+        checkAbort(signal);
+        step('detect', 'done');
+        step('analyze', 'done');
+        step('ben2', 'done');
+        step('refine', 'done');
+        modelName = 'BodyPix';
+        report(80);
+      } else {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(
           `Segmentation model failed${detail}. Download AI models and restart.`,
         );
       }
+    }
+
+    if (result) {
       const inferenceMs = Date.now() - inferenceStart;
       console.info(
         `[Segmentation] ✅ ${result.modelName} EXECUTED — ` +
         `${decoded.origW}×${decoded.origH}px in ${inferenceMs}ms`,
       );
-      // Save raw ONNX output for inspection (non-blocking)
       saveMask('1_raw_onnx', result.alpha, decoded.origW, decoded.origH);
 
       step('detect', 'done');
@@ -527,7 +539,6 @@ export async function removeBackgroundPro(
           `[Segmentation] ✅ BEN2 EXECUTED — ` +
           `boundary refined in ${Date.now() - ben2Start}ms`,
         );
-        // Save post-BEN2 mask for comparison (non-blocking)
         saveMask('2_post_ben2', coarseAlpha, decoded.origW, decoded.origH);
 
         step('ben2', 'done');
@@ -546,24 +557,10 @@ export async function removeBackgroundPro(
       const matteStart = Date.now();
       alpha = refineAlpha(coarseAlpha, decoded.origPixels, decoded.origW, decoded.origH, { hd });
       console.info(`[Segmentation] ✅ Alpha matting done in ${Date.now() - matteStart}ms`);
-      // Save final refined alpha for comparison against raw ONNX output (non-blocking)
       saveMask('3_final_alpha', alpha, decoded.origW, decoded.origH);
       checkAbort(signal);
       step('refine', 'done');
       report(84);
-
-    } else {
-      // Native: BodyPix
-      report(18);
-      step('detect', 'running');
-      alpha     = await bodyPixAlpha(decoded, hd);
-      checkAbort(signal);
-      step('detect', 'done');
-      step('analyze', 'done');
-      step('ben2', 'done');
-      step('refine', 'done');
-      modelName = 'BodyPix';
-      report(80);
     }
 
     // ── Stage 6: Enhance Edges + Composite ───────────────────────────────
@@ -607,26 +604,28 @@ export async function blurBackgroundPro(
 
     let subjectWeight: Float32Array;
 
-    if (Platform.OS === 'web') {
-      // Quick analysis for blur — no BEN2 needed, but routing still enforced
-      // so low-memory devices use RMBG-2.0 first instead of BiRefNet
-      const [analysis, capability] = await Promise.all([
-        analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
-        detectDeviceCapabilities(),
-      ]);
-      const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
-        modelRegistry.get('birefnet')?.status === 'ai-loading';
-      const decision = routeImage(analysis, capability, false, birefnetAvailable);
+    // Quick analysis for blur — no BEN2, but routing still enforced (all platforms)
+    const [analysis, capability] = await Promise.all([
+      analyzeImage(decoded.origPixels, decoded.origW, decoded.origH, uri),
+      detectDeviceCapabilities(),
+    ]);
+    const birefnetAvailable = modelRegistry.get('birefnet')?.status === 'ai-cached' ||
+      modelRegistry.get('birefnet')?.status === 'ai-loading';
+    const decision = routeImage(analysis, capability, false, birefnetAvailable);
 
-      const result = await onnxAlpha(decoded, analysis, decision, signal);
-      checkAbort(signal);
-      if (!result) {
+    const result = await onnxAlpha(decoded, analysis, decision, signal);
+    checkAbort(signal);
+    if (!result) {
+      if (Platform.OS !== 'web') {
+        // Native fallback: BodyPix (ONNX models not yet downloaded to device)
+        console.warn('[Segmentation] ONNX unavailable on native — using BodyPix for blur');
+        subjectWeight = await bodyPixAlpha(decoded);
+      } else {
         const detail = lastOrtError ? ` (${lastOrtError})` : '';
         throw new Error(`Segmentation model failed${detail}. Download AI models.`);
       }
-      subjectWeight = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
     } else {
-      subjectWeight = await bodyPixAlpha(decoded);
+      subjectWeight = refineAlpha(result.alpha, decoded.origPixels, decoded.origW, decoded.origH);
     }
 
     checkAbort(signal);
