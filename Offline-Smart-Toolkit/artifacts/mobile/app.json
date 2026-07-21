@@ -30,7 +30,10 @@
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_AUDIO"
       ]
     },
     "web": {
@@ -77,10 +80,11 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "357f31b8-8a40-4286-8d50-f84001690517"
+        "projectId": "ee7f25cc-3c2b-4319-99e2-593dc5b4bd1d"
       }
     },
-    "owner": "testbyais-team"
+    "owner": "testtttttttheees-team"
   }
 }
