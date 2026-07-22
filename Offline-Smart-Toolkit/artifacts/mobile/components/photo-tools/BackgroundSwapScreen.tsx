@@ -100,9 +100,9 @@ export function BackgroundSwapScreen({
   const colors = useColors();
 
   // ── State ─────────────────────────────────────────────────────────────────
-  // On native, BodyPix is used (no ONNX download needed) → gate is always open.
-  // On web, the ModelDownloadGate checks / downloads ONNX models before opening.
-  const [modelsReady, setModelsReady] = useState(Platform.OS !== 'web');
+  // Gate starts closed on all platforms — ModelDownloadGate checks cache and
+  // prompts download if needed (both web and native use ONNX now).
+  const [modelsReady, setModelsReady] = useState(false);
   const [image, setImage]   = useState<PickedImage | null>(null);
   const [preset, setPreset] = useState<BackgroundPreset>(defaultPreset);
   const [quality, setQuality] = useState<QualityMode>('standard');
