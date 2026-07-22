@@ -19,10 +19,15 @@ cd Offline-Smart-Toolkit/artifacts/mobile
 echo "y" | npx expo prebuild --platform android --clean --no-install
 ```
 
-### To build APK (debug) with EAS
+### To build APK with EAS (recommended — uses EAS cloud builders)
 ```bash
-eas build --platform android --profile preview
+# Requires EXPO_TOKEN secret set in Replit Secrets, and an Expo account
+# with the project configured (eas.json already configured)
+cd Offline-Smart-Toolkit/artifacts/mobile
+EXPO_TOKEN=$EXPO_TOKEN npx eas-cli build --platform android --profile preview --non-interactive
 ```
+The `preview` profile builds a signed APK (internal distribution).  
+AI models (BiRefNet ~44 MB, U2Net ~4.4 MB) are NOT bundled in the APK — they download from the internet on first use inside the app.
 
 ### To build AAB (production / Play Store)
 ```bash

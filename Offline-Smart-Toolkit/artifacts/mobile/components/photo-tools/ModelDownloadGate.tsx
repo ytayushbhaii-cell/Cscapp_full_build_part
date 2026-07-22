@@ -26,7 +26,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Animated,
-  ActivityIndicator,
+  ActivityIndicator, Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
@@ -96,7 +96,9 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
     sizeBytes:   44 * 1024 * 1024,
     downloadUrl: resolveModelUrl(
       'EXPO_PUBLIC_BIREFNET_MODEL_URL',
-      '',                          // no universal public default — set env var before build
+      // Public HuggingFace mirror of the quantized BiRefNet ONNX (ZhengPeng7/BiRefNet, MIT licence).
+      // Override with EXPO_PUBLIC_BIREFNET_MODEL_URL to use your own hosted copy.
+      'https://huggingface.co/ZhengPeng7/BiRefNet/resolve/main/onnx/birefnet-q.onnx',
       '/models/birefnet-q.onnx',  // relative path works only in web preview
     ),
   },
@@ -149,6 +151,17 @@ const MODEL_SPECS: Record<string, ModelSpec> = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * On native (Android/iOS) a model can only be downloaded if its URL is an
+ * absolute HTTPS/HTTP address — relative paths like '/models/x.onnx' have no
+ * server to resolve them.  Returns false for those paths so the gate can skip
+ * the model gracefully rather than showing a broken download error.
+ */
+function isDownloadableOnCurrentPlatform(url: string): boolean {
+  if (Platform.OS === 'web') return true; // web can handle relative paths
+  return url.startsWith('https://') || url.startsWith('http://');
+}
 
 function fmtBytes(b: number): string {
   if (b >= 1024 * 1024 * 1024) return `${(b / (1024 ** 3)).toFixed(1)} GB`;
@@ -210,8 +223,12 @@ export function ModelDownloadGate({ modelIds, onReady, accentColor = '#6366F1' }
     let cancelled = false;
     (async () => {
       try {
-        // Only check models that actually have a spec defined
-        const validIds = modelIds.filter(id => MODEL_SPECS[id]);
+        // Only check models that have a spec AND a downloadable URL on this platform
+        const validIds = modelIds.filter(id => {
+          const spec = MODEL_SPECS[id];
+          if (!spec) return false;
+          return isDownloadableOnCurrentPlatform(spec.downloadUrl);
+        });
         if (validIds.length === 0) {
           if (!cancelled) { setGateState('ready'); onReady(); }
           return;
@@ -248,7 +265,12 @@ export function ModelDownloadGate({ modelIds, onReady, accentColor = '#6366F1' }
 
   // ── Download handler ──────────────────────────────────────────────────────
   const handleDownload = useCallback(async () => {
-    const validIds = modelIds.filter(id => MODEL_SPECS[id]);
+    // Only download models that have a spec AND a downloadable URL on this platform
+    const validIds = modelIds.filter(id => {
+      const spec = MODEL_SPECS[id];
+      if (!spec) return false;
+      return isDownloadableOnCurrentPlatform(spec.downloadUrl);
+    });
     if (validIds.length === 0) { setGateState('ready'); onReady(); return; }
 
     setGateState('downloading');
@@ -365,7 +387,11 @@ export function ModelDownloadGate({ modelIds, onReady, accentColor = '#6366F1' }
   }
 
   // ── Shared: model list for needs_download and downloading ─────────────────
-  const validIds  = modelIds.filter(id => MODEL_SPECS[id]);
+  const validIds  = modelIds.filter(id => {
+    const spec = MODEL_SPECS[id];
+    if (!spec) return false;
+    return isDownloadableOnCurrentPlatform(spec.downloadUrl);
+  });
   const totalSize = validIds.reduce((s, id) => s + (MODEL_SPECS[id]?.sizeBytes ?? 0), 0);
 
   // ── Render: needs_download ────────────────────────────────────────────────

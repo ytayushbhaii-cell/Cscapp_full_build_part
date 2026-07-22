@@ -18,7 +18,9 @@
         "buildType": "apk"
       },
       "env": {
-        "NPM_FLAGS": "--legacy-peer-deps"
+        "NPM_FLAGS": "--legacy-peer-deps",
+        "EXPO_PUBLIC_BIREFNET_MODEL_URL": "https://huggingface.co/ZhengPeng7/BiRefNet/resolve/main/onnx/birefnet-q.onnx",
+        "EXPO_PUBLIC_U2NET_MODEL_URL": "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx"
       }
     },
     "production": {
