@@ -1,26 +1,19 @@
-# Exclude files not needed for EAS native builds
-# ONNX models are web-only (used by onnxruntime-web in browser)
+# .easignore — files excluded from the EAS build archive upload.
+# These are web-only assets; they are NOT needed in the native APK/AAB.
+# Excluding them reduces the archive size from ~157 MB → ~50 MB and speeds up uploads.
+
+# Web-only ONNX model files (served from Expo web devserver; native apps download via URL)
 public/models/
 
-# Expo web dist output
+# WebAssembly ORT runtime (web only — native uses onnxruntime-react-native JNI libs)
+public/ort-wasm/
+public/ort.min.js
+
+# Previous web build output (not needed for native builds)
 dist/
 
-# Node modules (EAS installs fresh)
-node_modules/
+# macOS metadata folders
+**/.DS_Store
 
-# Git
-.git/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-nohup.out
-
-# Test files
-__tests__/
-
-# Local dev files
-.expo/
+# Test output
+coverage/
